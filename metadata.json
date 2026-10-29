@@ -1,0 +1,6 @@
+{
+  "name": "YojanaSetu - Indore District Scheme Discovery & Entitlement Platform",
+  "description": "Real-time, centralized government scheme discovery, eligibility calculator, Samagra family integration, DigiLocker verification, and citizen tracking for Indore District and MP State.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
