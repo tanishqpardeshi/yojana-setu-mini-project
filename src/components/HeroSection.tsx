@@ -26,7 +26,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
   totalSchemesCount,
 }) => {
   const malwiSuggestions = [
-    { label: 'लाडली बहना (₹1,250/माह)', query: 'लाडली बहना' },
+    { label: 'लाडली बहना (₹1,500/माह)', query: 'लाडली बहना' },
     { label: 'टापरो / आवास (₹2.5L)', query: 'टापरो आवास' },
     { label: 'हलवा / किसान (₹12,000/वर्ष)', query: 'हलवा किसान' },
     { label: 'ठेलो / स्वनिधि ऋण', query: 'ठेलो स्वनिधि' },

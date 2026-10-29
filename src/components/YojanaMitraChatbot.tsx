@@ -16,7 +16,8 @@ import {
   Search,
   ExternalLink,
   Volume2,
-  VolumeX
+  VolumeX,
+  Globe2
 } from 'lucide-react';
 import { SupportedLanguage, RagSearchResult } from '../types';
 
@@ -25,6 +26,8 @@ interface Message {
   text: string;
   time: string;
   retrievedChunks?: RagSearchResult[];
+  webCitations?: Array<{ title: string; uri: string }>;
+  webSearchQueries?: string[];
   modelUsed?: string;
 }
 
@@ -40,7 +43,7 @@ export const YojanaMitraChatbot: React.FC<YojanaMitraChatbotProps> = ({
   const [messages, setMessages] = useState<Message[]>([
     {
       sender: 'bot',
-      text: `राम-राम सा! मैं **'योजना मित्र'** (Yojana Mitra) हूँ — इंदौर जिले के नागरिकों का आधिकारिक Hybrid RAG AI योजना सहायक।\n\nमेरी ज्ञान-प्रणाली इंदौर कलेक्ट्रेट, नगर निगम (वार्ड 1-85) और चारों ग्रामीण जनपदों (इंदौर, महू, सांवेर, देपालपुर) के 47+ प्रामाणिक शासकीय नियमों और SQLite डेटाबेस से सीधे जुड़ी है।\n\nआप किसी भी योजना, पात्रता, आवश्यक दस्तावेज या प्रक्रिया के बारे में हिन्दी, माळवी या English में पूछ सकते हैं।`,
+      text: `राम-राम सा! मैं **'योजना मित्र'** (Yojana Mitra) हूँ — इंदौर जिले के नागरिकों का आधिकारिक AI योजना सहायक।\n\nमेरी प्रणाली Google Search Grounding और इंदौर कलेक्ट्रेट, नगर निगम (वार्ड 1-85) व चारों ग्रामीण जनपदों (इंदौर, महू, सांवेर, देपालपुर) के 51+ प्रामाणिक शासकीय नियमों से सीधे जुड़ी है।\n\nआप किसी भी योजना, ताज़ा सरकारी आदेश, पात्रता, आवश्यक दस्तावेज या आवेदन प्रक्रिया के बारे में हिन्दी, माळवी या English में पूछ सकते हैं।`,
       time: 'Just now',
     },
   ]);
@@ -84,6 +87,7 @@ export const YojanaMitraChatbot: React.FC<YojanaMitraChatbotProps> = ({
   };
 
   const quickPrompts = [
+    { label: '🌐 ताज़ा सरकारी आदेश (Search Grounded)', text: 'मध्य प्रदेश व इंदौर जिले में वर्तमान माह के नवीनतम सरकारी आदेश, किस्त वितरण और योजना अपडेट क्या हैं?' },
     { label: 'लाड़ली बहना के नियम', text: 'लाड़ली बहना योजना के लिए पात्रता, उम्र और आवश्यक दस्तावेज क्या हैं?' },
     { label: 'देपालपुर व सांवेर किसान योजनाएं', text: 'देपालपुर और सांवेर के किसानों के लिए पीएम-किसान और मालवी गोवंश योजना की जानकारी दीजिए।' },
     { label: 'रेहड़ी / ठेला स्वनिधि लोन', text: 'इंदौर नगर निगम में ठेला लगाने वालों को पीएम स्वनिधि में लोन कैसे मिलता है?' },
@@ -131,6 +135,8 @@ export const YojanaMitraChatbot: React.FC<YojanaMitraChatbotProps> = ({
         text: data.reply || 'माफ़ कीजिए, उत्तर प्राप्त नहीं हुआ। कृपया पुनः प्रयास करें।',
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         retrievedChunks: data.retrievedChunks,
+        webCitations: data.webCitations,
+        webSearchQueries: data.webSearchQueries,
         modelUsed: data.modelUsed,
       };
 
@@ -270,6 +276,35 @@ export const YojanaMitraChatbot: React.FC<YojanaMitraChatbotProps> = ({
                               )}
                             </div>
                           ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Google Search Grounded Web Sources */}
+                  {isBot && msg.webCitations && msg.webCitations.length > 0 && (
+                    <div className="mt-2.5 p-2.5 rounded-xl bg-blue-50/90 border border-blue-200/80 text-[11px] space-y-1.5">
+                      <div className="flex items-center space-x-1.5 font-bold text-blue-900">
+                        <Globe2 className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                        <span>Google Search Grounded Live Web Sources:</span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 pt-0.5">
+                        {msg.webCitations.map((site, sIdx) => (
+                          <a
+                            key={sIdx}
+                            href={site.uri}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-white border border-blue-200 text-blue-700 hover:text-blue-900 hover:border-blue-400 text-[10px] font-medium transition shadow-2xs"
+                          >
+                            <span className="truncate max-w-[190px]">{site.title}</span>
+                            <ExternalLink className="w-2.5 h-2.5 shrink-0 ml-0.5" />
+                          </a>
+                        ))}
+                      </div>
+                      {msg.webSearchQueries && msg.webSearchQueries.length > 0 && (
+                        <div className="text-[9px] text-blue-700 font-mono">
+                          Search Query: {msg.webSearchQueries.join(', ')}
                         </div>
                       )}
                     </div>

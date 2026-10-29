@@ -38,7 +38,7 @@ test('expandQueryWithSynonyms expands Malwi terms into relevant query tokens', (
 
 test('hybridRagSearch retrieves relevant scheme for Ladli Behna query with high confidence', () => {
   const chunks = buildSchemeChunks(SCHEMES_DATABASE);
-  const results = hybridRagSearch('लाड़ली बहना ₹1250 उम्र नियम', chunks, 3);
+  const results = hybridRagSearch('लाड़ली बहना ₹1500 उम्र नियम', chunks, 3);
   
   assert.ok(results.length > 0);
   assert.ok(results[0].chunk.schemeTitle.toLowerCase().includes('ladli behna') || results[0].chunk.schemeTitleHindi.includes('लाड़ली'));

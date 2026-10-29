@@ -1,0 +1,81 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile containing authentication details, role and demographic preferences",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "role": { "type": "string", "enum": ["citizen", "operator", "admin"] },
+        "samagraId": { "type": "string" },
+        "wardNumber": { "type": "number" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["uid", "email", "role", "createdAt"]
+    },
+    "CitizenApplication": {
+      "title": "CitizenApplication",
+      "description": "Government scheme application submitted by or for a citizen",
+      "type": "object",
+      "properties": {
+        "arn": { "type": "string" },
+        "schemeId": { "type": "string" },
+        "schemeName": { "type": "string" },
+        "applicantName": { "type": "string" },
+        "applicantUid": { "type": "string" },
+        "aadhaarLast4": { "type": "string" },
+        "samagraId": { "type": "string" },
+        "wardNumber": { "type": "number" },
+        "status": { "type": "string", "enum": ["Submitted", "Under_Verification", "Field_Inspection", "Approved", "Disbursed", "Rejected"] },
+        "appliedAt": { "type": "string" },
+        "amountEstimated": { "type": "number" }
+      },
+      "required": ["arn", "schemeId", "applicantName", "applicantUid", "status", "appliedAt"]
+    },
+    "SavedScheme": {
+      "title": "SavedScheme",
+      "description": "Bookmarked government scheme saved to user profile",
+      "type": "object",
+      "properties": {
+        "schemeId": { "type": "string" },
+        "schemeTitle": { "type": "string" },
+        "savedAt": { "type": "string" }
+      },
+      "required": ["schemeId", "savedAt"]
+    },
+    "Announcement": {
+      "title": "Announcement",
+      "description": "Official district broadcast or alert",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "priority": { "type": "string", "enum": ["Normal", "Urgent", "Flash"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["title", "message", "priority", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile document"
+    },
+    "/users/{userId}/savedSchemes/{schemeId}": {
+      "schema": "SavedScheme",
+      "description": "User bookmarked schemes"
+    },
+    "/applications/{applicationId}": {
+      "schema": "CitizenApplication",
+      "description": "Government scheme applications"
+    },
+    "/announcements/{announcementId}": {
+      "schema": "Announcement",
+      "description": "District administrative broadcasts"
+    }
+  }
+}

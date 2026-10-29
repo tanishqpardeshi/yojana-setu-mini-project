@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Search, 
   CheckCircle, 
@@ -11,7 +11,11 @@ import {
   PhoneCall, 
   QrCode,
   ShieldCheck,
-  Download
+  Download,
+  Share2,
+  Copy,
+  ExternalLink,
+  Check
 } from 'lucide-react';
 import { ApplicationRecord, SupportedLanguage } from '../types';
 import { INITIAL_APPLICATION_RECORDS } from '../data/samagraMockProfiles';
@@ -29,10 +33,43 @@ export const ApplicationTrackerView: React.FC<ApplicationTrackerViewProps> = ({
   const [selectedRecord, setSelectedRecord] = useState<ApplicationRecord>(applications[0] || INITIAL_APPLICATION_RECORDS[0]);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [isSearching, setIsSearching] = useState(false);
+  const [deepLinkVerified, setDeepLinkVerified] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [showQrModal, setShowQrModal] = useState(false);
+
+  // Check URL query parameters for ?verifyARN= or ?arn=
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const targetArn = (params.get('verifyARN') || params.get('arn'))?.trim().toUpperCase();
+    if (targetArn) {
+      setSearchArn(targetArn);
+      const match = applications.find(a => a.arn.toUpperCase() === targetArn);
+      if (match) {
+        setSelectedRecord(match);
+        setDeepLinkVerified(true);
+      } else {
+        // Fetch from backend API
+        fetch(`/api/applications/${targetArn}`)
+          .then(r => r.ok ? r.json() : null)
+          .then(data => {
+            if (data?.record) {
+              setSelectedRecord(data.record);
+              setDeepLinkVerified(true);
+            }
+          })
+          .catch(() => {});
+      }
+    }
+  }, [applications]);
+
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const verificationUrl = `${origin}/?verifyARN=${encodeURIComponent(selectedRecord.arn)}`;
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     setSearchError(null);
+    setDeepLinkVerified(false);
     const cleaned = searchArn.trim().toUpperCase();
     if (!cleaned) return;
 
@@ -64,6 +101,27 @@ export const ApplicationTrackerView: React.FC<ApplicationTrackerViewProps> = ({
 
   const handlePrint = () => {
     window.print();
+  };
+
+  const handleWhatsAppShare = () => {
+    const text = `🏛️ *YojanaSetu Indore - शासकीय योजना आवेदन पावती (Official Receipt)*\n\n` +
+      `📑 *आवेदन क्रमांक / ARN:* ${selectedRecord.arn}\n` +
+      `👤 *आवेदक / Applicant:* ${selectedRecord.applicantName}\n` +
+      `📜 *योजना / Scheme:* ${selectedRecord.schemeTitle}\n` +
+      `📍 *क्षेत्र / Ward or Block:* ${selectedRecord.wardOrBlock}\n` +
+      `📊 *स्थिति / Current Status:* ${selectedRecord.currentStatus.toUpperCase()}\n` +
+      `📅 *आवेदन दिनांक / Date:* ${selectedRecord.appliedDate}\n` +
+      (selectedRecord.sanctionAmount ? `💰 *स्वीकृत राशि / Sanctioned Amount:* ₹${selectedRecord.sanctionAmount.toLocaleString('en-IN')}\n\n` : '\n') +
+      `🔍 *ऑनलाइन पावती सत्यापन / Verify Receipt Online:* ${verificationUrl}`;
+    
+    const shareUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+    window.open(shareUrl, '_blank');
+  };
+
+  const handleCopyLink = () => {
+    navigator.clipboard?.writeText(verificationUrl);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2500);
   };
 
   const statusMeta = {

@@ -162,61 +162,58 @@ function rowToApplication(row: any): ApplicationRecord {
   };
 }
 
-// Seed initial data if tables are empty
+// Seed / Sync schemes data on startup
 function seedDatabase() {
-  const schemeCount = (db.prepare('SELECT count(*) as count FROM schemes').get() as any).count;
-  if (schemeCount === 0) {
-    const insertSchemeStmt = db.prepare(`
-      INSERT INTO schemes (
-        id, code, title, title_hindi, title_malwi, governance_level, department,
-        nodal_office_indore, helpline, target_beneficiary, description, description_hindi,
-        benefits, benefits_hindi, financial_amount, financial_frequency, financial_desc,
-        eligibility_rules_json, required_documents_json, tags_json, malwi_synonyms_json,
-        apply_url, csc_available, active_budget_cr, updated_at
-      ) VALUES (
-        @id, @code, @title, @titleHindi, @titleMalwi, @governanceLevel, @department,
-        @nodalOfficeIndore, @helpline, @targetBeneficiary, @description, @descriptionHindi,
-        @benefits, @benefitsHindi, @financialAmount, @financialFrequency, @financialDesc,
-        @eligibilityRulesJson, @requiredDocumentsJson, @tagsJson, @malwiSynonymsJson,
-        @applyUrl, @cscAvailable, @activeBudgetCr, @updatedAt
-      )
-    `);
+  const insertSchemeStmt = db.prepare(`
+    INSERT OR REPLACE INTO schemes (
+      id, code, title, title_hindi, title_malwi, governance_level, department,
+      nodal_office_indore, helpline, target_beneficiary, description, description_hindi,
+      benefits, benefits_hindi, financial_amount, financial_frequency, financial_desc,
+      eligibility_rules_json, required_documents_json, tags_json, malwi_synonyms_json,
+      apply_url, csc_available, active_budget_cr, updated_at
+    ) VALUES (
+      @id, @code, @title, @titleHindi, @titleMalwi, @governanceLevel, @department,
+      @nodalOfficeIndore, @helpline, @targetBeneficiary, @description, @descriptionHindi,
+      @benefits, @benefitsHindi, @financialAmount, @financialFrequency, @financialDesc,
+      @eligibilityRulesJson, @requiredDocumentsJson, @tagsJson, @malwiSynonymsJson,
+      @applyUrl, @cscAvailable, @activeBudgetCr, @updatedAt
+    )
+  `);
 
-    const insertManySchemes = db.transaction((schemes: Scheme[]) => {
-      for (const s of schemes) {
-        insertSchemeStmt.run({
-          id: s.id,
-          code: s.code,
-          title: s.title,
-          titleHindi: s.titleHindi,
-          titleMalwi: s.titleMalwi,
-          governanceLevel: s.governanceLevel,
-          department: s.department,
-          nodalOfficeIndore: s.nodalOfficeIndore,
-          helpline: s.helpline,
-          targetBeneficiary: s.targetBeneficiary,
-          description: s.description,
-          descriptionHindi: s.descriptionHindi,
-          benefits: s.benefits,
-          benefitsHindi: s.benefitsHindi,
-          financialAmount: s.financialEntitlement.amount,
-          financialFrequency: s.financialEntitlement.frequency,
-          financialDesc: s.financialEntitlement.description,
-          eligibilityRulesJson: JSON.stringify(s.eligibilityRules),
-          requiredDocumentsJson: JSON.stringify(s.requiredDocuments),
-          tagsJson: JSON.stringify(s.tags),
-          malwiSynonymsJson: JSON.stringify(s.malwiSynonyms),
-          applyUrl: s.applyUrl || null,
-          cscAvailable: s.cscAvailable ? 1 : 0,
-          activeBudgetCr: s.activeBudgetCr || null,
-          updatedAt: new Date().toISOString(),
-        });
-      }
-    });
+  const insertManySchemes = db.transaction((schemes: Scheme[]) => {
+    for (const s of schemes) {
+      insertSchemeStmt.run({
+        id: s.id,
+        code: s.code,
+        title: s.title,
+        titleHindi: s.titleHindi,
+        titleMalwi: s.titleMalwi,
+        governanceLevel: s.governanceLevel,
+        department: s.department,
+        nodalOfficeIndore: s.nodalOfficeIndore,
+        helpline: s.helpline,
+        targetBeneficiary: s.targetBeneficiary,
+        description: s.description,
+        descriptionHindi: s.descriptionHindi,
+        benefits: s.benefits,
+        benefitsHindi: s.benefitsHindi,
+        financialAmount: s.financialEntitlement.amount,
+        financialFrequency: s.financialEntitlement.frequency,
+        financialDesc: s.financialEntitlement.description,
+        eligibilityRulesJson: JSON.stringify(s.eligibilityRules),
+        requiredDocumentsJson: JSON.stringify(s.requiredDocuments),
+        tagsJson: JSON.stringify(s.tags),
+        malwiSynonymsJson: JSON.stringify(s.malwiSynonyms),
+        applyUrl: s.applyUrl || null,
+        cscAvailable: s.cscAvailable ? 1 : 0,
+        activeBudgetCr: s.activeBudgetCr || null,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+  });
 
-    insertManySchemes(SCHEMES_DATABASE);
-    console.log(`[SQLite] Seeded ${SCHEMES_DATABASE.length} schemes into SQLite database.`);
-  }
+  insertManySchemes(SCHEMES_DATABASE);
+  console.log(`[SQLite] Synced ${SCHEMES_DATABASE.length} schemes into SQLite database.`);
 
   // Seed applications
   const appCount = (db.prepare('SELECT count(*) as count FROM applications').get() as any).count;

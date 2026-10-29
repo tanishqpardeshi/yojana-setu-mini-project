@@ -13,7 +13,10 @@ import {
   IndianRupee, 
   ExternalLink,
   ShieldAlert,
-  Info
+  Info,
+  Bookmark,
+  Check,
+  Plus
 } from 'lucide-react';
 import { 
   CitizenProfile, 
@@ -29,6 +32,23 @@ import {
 import { IMC_WARDS, JANPAD_BLOCKS, GOVERNANCE_LEVEL_NAMES } from '../data/indoreGovernance';
 import { evaluateSchemeEligibility, rankSchemesForCitizen } from '../utils/rulesEngine';
 
+export const DOCUMENT_NAMES: Record<string, { en: string; hi: string; sampleNumber: string }> = {
+  aadhaar: { en: 'Aadhaar Card', hi: 'आधार कार्ड', sampleNumber: 'UID-XXXX-XXXX-8192' },
+  samagra_member: { en: 'Samagra Member ID', hi: 'समग्र सदस्य आईडी', sampleNumber: 'SPR-109283742' },
+  samagra_family: { en: 'Samagra Family ID', hi: 'समग्र परिवार आईडी', sampleNumber: 'SPR-48921840' },
+  mp_domicile: { en: 'MP Domicile Certificate', hi: 'म.प्र. मूल निवासी प्रमाण पत्र', sampleNumber: 'MP-DOM-2024-912' },
+  income_cert: { en: 'Income Certificate', hi: 'आय प्रमाण पत्र', sampleNumber: 'MP-INC-2026-4421' },
+  khasra_b1: { en: 'Land Record Khasra B-1', hi: 'खसरा / बी-1 खतौनी', sampleNumber: 'BHULEKH-IND-8819' },
+  caste_cert: { en: 'Caste Certificate', hi: 'जाति प्रमाण पत्र', sampleNumber: 'MP-CST-2025-1029' },
+  bank_dbt: { en: 'Bank Passbook (DBT Active)', hi: 'बैंक खाता डीबीटी पासबुक', sampleNumber: 'NPCI-BOI-8192' },
+  udid_card: { en: 'UDID Disability Card', hi: 'यूडीआईडी दिव्यांग प्रमाण पत्र', sampleNumber: 'MP-DIS-2023-401' },
+  vendor_id: { en: 'Street Vendor ID / LOR', hi: 'स्ट्रीट वेंडर पहचान पत्र', sampleNumber: 'IMC-SV-2026-771' },
+  bpl_ration: { en: 'BPL Ration Card', hi: 'बीपीएल राशन कार्ड', sampleNumber: 'NFSA-MP-49120' },
+  sambal_card: { en: 'Sambal 2.0 Card', hi: 'संबल 2.0 कार्ड', sampleNumber: 'SAMBAL-2026-993' },
+  elec_bill: { en: 'Electricity Bill', hi: 'विद्युत बिल', sampleNumber: 'MPPKVVCL-99214' },
+  birth_cert: { en: 'Birth Certificate', hi: 'जन्म प्रमाण पत्र', sampleNumber: 'IMC-BIRTH-2022-09' },
+};
+
 interface EligibilityCalculatorProps {
   schemes: Scheme[];
   currentLanguage: SupportedLanguage;
@@ -36,6 +56,8 @@ interface EligibilityCalculatorProps {
   setProfile: React.Dispatch<React.SetStateAction<CitizenProfile>>;
   onApplyScheme: (scheme: Scheme, profile: CitizenProfile) => void;
   onNavigateToDigilocker: () => void;
+  savedSchemeIds?: string[];
+  onToggleSaveScheme?: (scheme: Scheme) => void;
 }
 
 export const EligibilityCalculator: React.FC<EligibilityCalculatorProps> = ({
@@ -45,9 +67,30 @@ export const EligibilityCalculator: React.FC<EligibilityCalculatorProps> = ({
   setProfile,
   onApplyScheme,
   onNavigateToDigilocker,
+  savedSchemeIds = [],
+  onToggleSaveScheme,
 }) => {
   const [filterTab, setFilterTab] = useState<'all' | 'eligible' | 'likely' | 'not_eligible'>('all');
   const [selectedSchemeDetail, setSelectedSchemeDetail] = useState<SchemeEligibilityResult | null>(null);
+  const [resolvedDocToast, setResolvedDocToast] = useState<string | null>(null);
+
+  const handleQuickVerifyDoc = (docId: string) => {
+    const meta = DOCUMENT_NAMES[docId] || { en: docId, hi: docId, sampleNumber: `DL-${docId.toUpperCase()}` };
+    setProfile(p => ({
+      ...p,
+      verifiedDocuments: {
+        ...(p.verifiedDocuments || {}),
+        [docId]: {
+          verified: true,
+          source: 'digilocker',
+          docNumber: meta.sampleNumber,
+          verifiedAt: new Date().toISOString(),
+        },
+      },
+    }));
+    setResolvedDocToast(`${meta.en} (${meta.hi}) verified in DigiLocker! Recalculating eligibility to 100% Eligible.`);
+    setTimeout(() => setResolvedDocToast(null), 4000);
+  };
 
   // Real-time evaluation of all schemes
   const eligibilityResults = useMemo(() => {
@@ -331,27 +374,68 @@ export const EligibilityCalculator: React.FC<EligibilityCalculatorProps> = ({
             </div>
           </div>
 
-          {/* Landholding (if farmer) */}
-          {profile.occupation === 'Farmer' && (
-            <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200">
-              <div className="flex justify-between items-center mb-1">
-                <label htmlFor="landholdingInput" className="text-xs font-semibold text-emerald-900">
-                  Agricultural Land (खसरा भूमि - हेक्टेयर):
-                </label>
-                <span className="text-xs font-bold text-emerald-800 font-mono">{profile.landHoldingHectares} Ha</span>
+          {/* Agricultural Landholding (Visible for farmers & rural/landowning citizens) */}
+          <div className="p-3.5 bg-emerald-50/80 rounded-xl border border-emerald-200 space-y-2">
+            <div className="flex justify-between items-center">
+              <label htmlFor="landholdingInput" className="text-xs font-semibold text-emerald-950 flex items-center space-x-1">
+                <span>🌾 Agricultural Land (खसरा कृषि भूमि):</span>
+              </label>
+              <div className="flex items-center space-x-1">
+                <input
+                  type="number"
+                  min="0"
+                  max="50"
+                  step="0.1"
+                  value={profile.landHoldingHectares}
+                  onChange={e => setProfile(p => ({ ...p, landHoldingHectares: Math.max(0, Number(e.target.value)) }))}
+                  className="w-16 px-1.5 py-0.5 text-xs font-mono font-bold text-emerald-900 bg-white border border-emerald-300 rounded text-right"
+                />
+                <span className="text-xs font-bold text-emerald-800">Ha</span>
               </div>
-              <input
-                id="landholdingInput"
-                type="range"
-                min="0"
-                max="10"
-                step="0.1"
-                value={profile.landHoldingHectares}
-                onChange={e => setProfile(p => ({ ...p, landHoldingHectares: Number(e.target.value) }))}
-                className="w-full accent-emerald-600"
-              />
             </div>
-          )}
+
+            <input
+              id="landholdingInput"
+              type="range"
+              min="0"
+              max="10"
+              step="0.1"
+              value={profile.landHoldingHectares}
+              onChange={e => setProfile(p => ({ ...p, landHoldingHectares: Number(e.target.value) }))}
+              className="w-full accent-emerald-600 cursor-pointer"
+            />
+
+            {/* Quick Presets */}
+            <div className="flex flex-wrap gap-1 pt-0.5">
+              {[
+                { label: '0 Ha (Landless)', val: 0 },
+                { label: '0.5 Ha', val: 0.5 },
+                { label: '1.5 Ha (Small)', val: 1.5 },
+                { label: '2.5 Ha', val: 2.5 },
+                { label: '5.0 Ha', val: 5.0 },
+              ].map(preset => (
+                <button
+                  key={preset.label}
+                  type="button"
+                  onClick={() => setProfile(p => ({ ...p, landHoldingHectares: preset.val }))}
+                  className={`px-2 py-0.5 text-[10px] font-bold rounded transition cursor-pointer border ${
+                    profile.landHoldingHectares === preset.val
+                      ? 'bg-emerald-600 text-white border-emerald-600'
+                      : 'bg-white hover:bg-emerald-100 text-emerald-900 border-emerald-300'
+                  }`}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+
+            {profile.landHoldingHectares > 0 && (
+              <div className="text-[10px] text-emerald-800 font-medium flex items-center space-x-1 pt-1 border-t border-emerald-200">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse"></span>
+                <span>Qualifies for PM-KISAN, PMFBY, PM-KUSUM & MP Kisan Kalyan</span>
+              </div>
+            )}
+          </div>
 
           {/* Social Category & Marital Status */}
           <div className="grid grid-cols-2 gap-3">
@@ -423,6 +507,22 @@ export const EligibilityCalculator: React.FC<EligibilityCalculatorProps> = ({
 
         {/* RIGHT COLUMN: Scheme Results Cards (8 cols on lg) */}
         <div className="lg:col-span-8 space-y-4">
+          {resolvedDocToast && (
+            <div className="p-3 bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center justify-between shadow-md animate-fade-in">
+              <div className="flex items-center space-x-2">
+                <Check className="w-4 h-4 shrink-0 bg-white/20 p-0.5 rounded-full" />
+                <span>{resolvedDocToast}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setResolvedDocToast(null)}
+                className="text-white/80 hover:text-white font-bold ml-2 text-sm"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
           <div className="flex items-center justify-between text-xs text-slate-500 pb-2 border-b border-slate-200">
             <span>
               Showing <strong className="text-slate-800">{displayedResults.length}</strong> matching schemes for profile
@@ -542,15 +642,47 @@ export const EligibilityCalculator: React.FC<EligibilityCalculatorProps> = ({
                       </div>
                     )}
 
-                    {/* Missing Documents notice */}
+                    {/* Missing Documents Interactive Resolution */}
                     {missingDocuments.length > 0 && status !== 'not_eligible' && (
-                      <div className="flex items-start space-x-2 text-xs text-amber-800 bg-amber-50 p-2 rounded-lg border border-amber-200">
-                        <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
-                        <div>
-                          <strong>{missingDocuments.length} pending document(s) for 100% verification:</strong>
-                          <span className="ml-1 text-slate-600 font-mono text-[11px]">
-                            {missingDocuments.join(', ')}
-                          </span>
+                      <div className="mt-3 p-3 rounded-xl bg-amber-50/90 border border-amber-200 space-y-2">
+                        <div className="flex items-center justify-between flex-wrap gap-1">
+                          <div className="flex items-center space-x-1.5 text-xs font-bold text-amber-900">
+                            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                            <span>
+                              {missingDocuments.length} Pending Document{missingDocuments.length > 1 ? 's' : ''} to reach 100% Eligible:
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={onNavigateToDigilocker}
+                            className="text-[11px] font-bold text-amber-800 hover:text-amber-950 underline flex items-center space-x-1 cursor-pointer"
+                          >
+                            <span>Open DigiLocker Wallet</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </button>
+                        </div>
+
+                        {/* Interactive Clickable Badges with English & Hindi */}
+                        <div className="flex flex-wrap gap-1.5 pt-0.5">
+                          {missingDocuments.map(docId => {
+                            const docMeta = DOCUMENT_NAMES[docId] || { en: docId, hi: docId };
+                            return (
+                              <button
+                                key={docId}
+                                type="button"
+                                onClick={() => handleQuickVerifyDoc(docId)}
+                                className="group inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-white hover:bg-emerald-50 text-slate-800 hover:text-emerald-800 border border-amber-300 hover:border-emerald-400 shadow-2xs transition cursor-pointer"
+                                title={`Click to verify ${docMeta.en} (${docMeta.hi}) in DigiLocker to upgrade scheme to 100% Eligible`}
+                              >
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 group-hover:bg-emerald-500"></span>
+                                <span className="font-semibold">{docMeta.en}</span>
+                                <span className="text-[10px] text-slate-500 group-hover:text-emerald-700">({docMeta.hi})</span>
+                                <span className="ml-1 text-[10px] font-bold bg-amber-100 group-hover:bg-emerald-200 text-amber-900 group-hover:text-emerald-900 px-1 rounded">
+                                  + Verify
+                                </span>
+                              </button>
+                            );
+                          })}
                         </div>
                       </div>
                     )}
@@ -564,16 +696,31 @@ export const EligibilityCalculator: React.FC<EligibilityCalculatorProps> = ({
                     </div>
 
                     <div className="flex items-center space-x-2">
+                      {onToggleSaveScheme && (
+                        <button
+                          onClick={() => onToggleSaveScheme(scheme)}
+                          className={`px-2.5 py-1.5 rounded-lg border text-xs transition cursor-pointer flex items-center space-x-1 ${
+                            savedSchemeIds.includes(scheme.id)
+                              ? 'bg-amber-100 border-amber-300 text-amber-800 font-bold'
+                              : 'bg-white border-slate-200 text-slate-600 hover:text-amber-700 hover:border-amber-300'
+                          }`}
+                          title={savedSchemeIds.includes(scheme.id) ? 'Saved in cloud profile (Click to remove)' : 'Save scheme to cloud profile'}
+                        >
+                          <Bookmark className={`w-3.5 h-3.5 ${savedSchemeIds.includes(scheme.id) ? 'fill-amber-600 text-amber-600' : ''}`} />
+                          <span className="text-[11px] hidden sm:inline">{savedSchemeIds.includes(scheme.id) ? 'Saved' : 'Save'}</span>
+                        </button>
+                      )}
+
                       <button
                         onClick={() => setSelectedSchemeDetail(result)}
-                        className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 transition"
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 transition cursor-pointer"
                       >
                         Rules Breakdown
                       </button>
 
                       <button
                         onClick={() => onApplyScheme(scheme, profile)}
-                        className="px-4 py-1.5 rounded-lg text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 transition flex items-center space-x-1 shadow-xs"
+                        className="px-4 py-1.5 rounded-lg text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 transition flex items-center space-x-1 shadow-xs cursor-pointer"
                       >
                         <span>Apply / Register</span>
                         <ArrowRight className="w-3.5 h-3.5" />
@@ -652,28 +799,47 @@ export const EligibilityCalculator: React.FC<EligibilityCalculatorProps> = ({
               {/* Required Documents Checklist */}
               <div>
                 <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
-                  Required Documents Checklist:
+                  Required Documents Checklist & DigiLocker Status:
                 </h4>
-                <div className="flex flex-wrap gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {selectedSchemeDetail.scheme.requiredDocuments.map(docId => {
                     const isVerified = profile.verifiedDocuments?.[docId]?.verified;
+                    const docMeta = DOCUMENT_NAMES[docId] || { en: docId, hi: docId };
                     return (
-                      <span
+                      <div
                         key={docId}
-                        className={`text-xs px-2.5 py-1 rounded-lg font-mono font-medium border flex items-center space-x-1 ${
+                        className={`p-2.5 rounded-xl text-xs border flex items-center justify-between gap-2 ${
                           isVerified
-                            ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                            : 'bg-slate-100 text-slate-700 border-slate-300'
+                            ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
+                            : 'bg-slate-50 text-slate-700 border-slate-300'
                         }`}
                       >
+                        <div className="flex items-center space-x-2 min-w-0">
+                          {isVerified ? (
+                            <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                          ) : (
+                            <FileText className="w-4 h-4 text-slate-400 shrink-0" />
+                          )}
+                          <div className="truncate">
+                            <div className="font-bold truncate">{docMeta.en}</div>
+                            <div className="text-[10px] text-slate-500">{docMeta.hi}</div>
+                          </div>
+                        </div>
+
                         {isVerified ? (
-                          <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
+                          <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full whitespace-nowrap">
+                            ✓ Verified
+                          </span>
                         ) : (
-                          <FileText className="w-3.5 h-3.5 text-slate-400" />
+                          <button
+                            type="button"
+                            onClick={() => handleQuickVerifyDoc(docId)}
+                            className="text-[10px] font-bold text-amber-900 bg-amber-100 hover:bg-emerald-600 hover:text-white px-2 py-1 rounded-lg border border-amber-300 transition whitespace-nowrap cursor-pointer"
+                          >
+                            + Verify Now
+                          </button>
                         )}
-                        <span>{docId}</span>
-                        {isVerified && <span className="text-[10px] font-bold text-emerald-700">✓ Verified</span>}
-                      </span>
+                      </div>
                     );
                   })}
                 </div>

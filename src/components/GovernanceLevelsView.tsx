@@ -67,7 +67,7 @@ export const GovernanceLevelsView: React.FC<GovernanceLevelsViewProps> = ({
       heroBorder: 'border-emerald-200 hover:border-emerald-400',
       agencies: 'Women & Child Development, Farmer Welfare, Technical Education, Labour Dept MP',
       nodalOffice: 'WCD Indore, Dy Labour Commissioner Residency, Employment Exchange Nanda Nagar',
-      description: 'Madhya Pradesh flagship citizen benefits: Mukhyamantri Ladli Behna (₹1,250/mo), MP Kisan Kalyan (₹6,000 extra bonus to farmers), Sambal 2.0 unorganized worker safety, MMSKY Seekho Kamao.',
+      description: 'Madhya Pradesh flagship citizen benefits: Mukhyamantri Ladli Behna (₹1,500/mo), MP Kisan Kalyan (₹6,000 extra bonus to farmers), Sambal 2.0 unorganized worker safety, MMSKY Seekho Kamao.',
       activeSchemes: schemes.filter(s => s.governanceLevel === 'state_mp'),
       budget: '₹1,343.0 Cr',
     },

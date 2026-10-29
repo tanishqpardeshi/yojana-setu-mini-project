@@ -254,7 +254,7 @@ export const INITIAL_APPLICATION_RECORDS: ApplicationRecord[] = [
     appliedDate: '2026-10-18',
     currentStatus: 'dbt_disbursed',
     officerInCharge: 'Smt. Anjali Gupta (WCD Project Officer, Zone 4)',
-    sanctionAmount: 1250,
+    sanctionAmount: 1500,
     kioskOperatorCode: 'MPON-IND-7201',
     remarks: 'Approved by Collector Indore. Aadhaar DBT account validated via NPCI.',
     timeline: [
@@ -262,7 +262,7 @@ export const INITIAL_APPLICATION_RECORDS: ApplicationRecord[] = [
       { title: 'Ward Field Verification', titleHindi: 'वार्ड भौतिक सत्यापन', date: '2026-10-20 03:30 PM', location: 'Zone 4 Office, Bhamori', status: 'completed', remarks: 'Aadhaar & marital status verified by Anganwadi Supervisor' },
       { title: 'Collectorate Scrutiny', titleHindi: 'कलेक्ट्रेट स्क्रूटनी', date: '2026-10-22 11:00 AM', location: 'Collectorate Campus, Moti Tabela', status: 'completed', remarks: 'No income tax filing found in family' },
       { title: 'Sanction Order Issued', titleHindi: 'स्वीकृति आदेश जारी', date: '2026-10-24 04:45 PM', location: 'WCD Indore Directorate', status: 'completed', remarks: 'Sanction ID: MP-LB-IND-2026-88219' },
-      { title: 'DBT Disbursal Complete', titleHindi: 'डीबीटी राशि अंतरित', date: '2026-10-28 09:15 AM', location: 'SBI Indore Main Branch (NPCI)', status: 'completed', remarks: '₹1,250 credited directly to Bank of India A/c ending 8192' },
+      { title: 'DBT Disbursal Complete', titleHindi: 'डीबीटी राशि अंतरित', date: '2026-10-28 09:15 AM', location: 'SBI Indore Main Branch (NPCI)', status: 'completed', remarks: '₹1,500 credited directly to Bank of India A/c ending 8192' },
     ],
   },
   {
@@ -321,10 +321,10 @@ export const INITIAL_NOTIFICATIONS: LiveNotification[] = [
     id: 'notif-1',
     timestamp: 'Just now',
     type: 'dbt_disbursed',
-    message: 'DBT Batch Released: ₹1,250 disbursed to 1,420 Ladli Behna beneficiaries in Ward 15 Khajrana.',
-    messageHindi: 'डीबीटी जारी: वार्ड 15 खजराना में 1,420 लाड़ली बहनों को ₹1,250 की राशि अंतरित।',
+    message: 'DBT Batch Released: ₹1,500 disbursed to 1,420 Ladli Behna beneficiaries in Ward 15 Khajrana.',
+    messageHindi: 'डीबीटी जारी: वार्ड 15 खजराना में 1,420 लाड़ली बहनों को ₹1,500 की राशि अंतरित।',
     wardOrBlock: 'Ward 15 (Khajrana)',
-    amount: 1775000,
+    amount: 2130000,
   },
   {
     id: 'notif-2',

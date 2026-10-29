@@ -26,7 +26,7 @@ export const getWardMetrics = (w: WardInfo) => {
   const activeApplications = Math.round(w.populationEstimate * 0.042) + (w.number * 7);
   const dbtDisbursedCr = Number(((activeApplications * 2800) / 10000000 + 1.2).toFixed(1));
   const topSchemes = w.povertyIndex === 'High' 
-    ? ['Ladli Behna (₹1,250/m)', 'PMAY-Urban (₹2.5L)', 'Sambal 2.0']
+    ? ['Ladli Behna (₹1,500/m)', 'PMAY-Urban (₹2.5L)', 'Sambal 2.0']
     : w.povertyIndex === 'Medium'
     ? ['Ladli Behna', 'PM SVANidhi (₹10k-50k)', 'Ayushman Bharat (₹5L)']
     : ['IMC Solar Net-Metering', 'Ladli Laxmi 2.0', 'Seekho Kamao'];

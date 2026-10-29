@@ -421,21 +421,40 @@ Always give crisp, compassionate, structured answers with:
         contents: promptText,
         config: {
           systemInstruction,
-          temperature: 0.6,
+          temperature: 0.5,
+          tools: [{ googleSearch: {} }],
         },
       });
 
       const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Gemini API timeout')), 3500)
+        setTimeout(() => reject(new Error('Gemini API timeout')), 8000)
       );
 
       const response = await Promise.race([geminiPromise, timeoutPromise]);
       const replyText = response.text || 'योजना मित्र: मैं आपकी सहायता के लिए सदैव उपलब्ध हूँ। कृपया योजना का नाम या अपनी पात्रता पूछें।';
 
+      // Extract Google Search Grounding Citations
+      const rawGroundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
+      const webSearchQueries = response.candidates?.[0]?.groundingMetadata?.webSearchQueries || [];
+      const webCitations: Array<{ title: string; uri: string }> = [];
+
+      if (Array.isArray(rawGroundingChunks)) {
+        for (const chunk of rawGroundingChunks) {
+          if (chunk.web && chunk.web.uri) {
+            webCitations.push({
+              title: chunk.web.title || chunk.web.uri,
+              uri: chunk.web.uri,
+            });
+          }
+        }
+      }
+
       return res.json({
         reply: replyText,
         retrievedChunks,
-        modelUsed: 'gemini-3.8-flash (RAG Grounded)',
+        webCitations,
+        webSearchQueries,
+        modelUsed: 'gemini-3.8-flash (Search Grounded)',
         latencyMs: Date.now() - startTime,
       });
     }
@@ -449,14 +468,65 @@ Always give crisp, compassionate, structured answers with:
     const topChunk = retrievedChunks[0].chunk;
     fallbackReply = `**${topChunk.schemeTitle} (${topChunk.schemeTitleHindi})**\n\n${topChunk.content}\n\n💡 **अधिक जानकारी या आवेदन हेतु:** अपने नजदीकी एमपी ऑनलाइन / सीएससी कियोस्क या इंदौर कलेक्ट्रेट/वार्ड कार्यालय से संपर्क करें।`;
   } else {
-    fallbackReply = `**नमस्ते! मैं 'योजना सेतु' का योजना मित्र हूँ।**\n\nइंदौर जिले में कुल **6 प्रशासनिक स्तरों** की योजनाएं संचालित हैं:\n1. **अंतर्राष्ट्रीय (ADB):** वार्डों में निःशुल्क नल कनेक्शन अनुदान।\n2. **राष्ट्रीय:** पीएम-किसान, पीएम आवास, आयुष्मान भारत (₹5 लाख मुफ्त इलाज)।\n3. **म.प्र. राज्य:** लाड़ली बहना (₹1,250/माह), सीखो कमाओ, संबल 2.0।\n4. **इंदौर कलेक्ट्रेट:** रेड क्रॉस आरोग्य निधि (₹1 लाख त्वरित चिकित्सा), अहिल्या दिव्यांग कोष।\n5. **नगर निगम (वार्ड 1-85):** स्वच्छता मित्र कल्याण, रूफटॉप सोलर ₹10,000 टॉप-अप।\n6. **ग्रामीण जनपद (महू, सांवेर, देपालपुर, इंदौर):** मालवी गोवंश व प्याज भंडारण सब्सिडी।`;
+    fallbackReply = `**नमस्ते! मैं 'योजना सेतु' का योजना मित्र हूँ।**\n\nइंदौर जिले में कुल **6 प्रशासनिक स्तरों** की योजनाएं संचालित हैं:\n1. **अंतर्राष्ट्रीय (ADB):** वार्डों में निःशुल्क नल कनेक्शन अनुदान।\n2. **राष्ट्रीय:** पीएम-किसान, पीएम आवास, आयुष्मान भारत (₹5 लाख मुफ्त इलाज)।\n3. **म.प्र. राज्य:** लाड़ली बहना (₹1,500/माह), सीखो कमाओ, संबल 2.0।\n4. **इंदौर कलेक्ट्रेट:** रेड क्रॉस आरोग्य निधि (₹1 लाख त्वरित चिकित्सा), अहिल्या दिव्यांग कोष।\n5. **नगर निगम (वार्ड 1-85):** स्वच्छता मित्र कल्याण, रूफटॉप सोलर ₹10,000 टॉप-अप।\n6. **ग्रामीण जनपद (महू, सांवेर, देपालपुर, इंदौर):** मालवी गोवंश व प्याज भंडारण सब्सिडी।`;
   }
 
   res.json({
     reply: fallbackReply,
     retrievedChunks,
+    webCitations: [],
+    webSearchQueries: [],
     modelUsed: 'YojanaSetu Hybrid RAG Rules Engine',
     latencyMs: Date.now() - startTime,
+  });
+});
+
+// Dedicated Google Search Grounded Endpoint for Real-Time Circulars & News
+app.post('/api/gemini/grounded-news', async (req: Request, res: Response) => {
+  const { topic } = req.body;
+  const query = topic || 'Madhya Pradesh government schemes 2026 Indore updates';
+
+  try {
+    if (process.env.GEMINI_API_KEY && !process.env.GEMINI_API_KEY.includes('MY_')) {
+      const ai = new GoogleGenAI({
+        apiKey: process.env.GEMINI_API_KEY,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          },
+        },
+      });
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: `Find the most recent official updates, news announcements, and deadlines for: ${query} in Indore / Madhya Pradesh. Provide concise bullet points and cite official portals.`,
+        config: {
+          tools: [{ googleSearch: {} }],
+        },
+      });
+
+      const rawChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
+      const webCitations = Array.isArray(rawChunks)
+        ? rawChunks.filter(c => c.web?.uri).map(c => ({ title: c.web?.title || c.web?.uri, uri: c.web?.uri }))
+        : [];
+
+      return res.json({
+        summary: response.text,
+        webCitations,
+        searchQueries: response.candidates?.[0]?.groundingMetadata?.webSearchQueries || [],
+      });
+    }
+  } catch (err: any) {
+    console.warn('Grounded news error:', err?.message);
+  }
+
+  res.json({
+    summary: 'ताज़ा शासकीय परिपत्र: इंदौर जिले में लाड़ली बहना, संबल 2.0, व पीएम सूर्य घर योजना के विशेष शिविर सभी 85 वार्डों एवं 4 जनपदों में आयोजित किए जा रहे हैं।',
+    webCitations: [
+      { title: 'Indore District Official Portal', uri: 'https://indore.nic.in' },
+      { title: 'MP State Citizen Portal', uri: 'https://mp.gov.in' }
+    ],
+    searchQueries: [query],
   });
 });
 

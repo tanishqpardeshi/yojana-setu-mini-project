@@ -40,6 +40,18 @@ import { AdminDashboard } from './components/AdminDashboard';
 import { ApplicationIntakeModal } from './components/ApplicationIntakeModal';
 import { CitizenEntitlementCardModal } from './components/CitizenEntitlementCardModal';
 import { SchemeComparisonModal } from './components/SchemeComparisonModal';
+import { SavedSchemesModal } from './components/SavedSchemesModal';
+import { 
+  auth, 
+  signInWithGoogle, 
+  logOutUser, 
+  saveSchemeToUserFirestore, 
+  removeSavedSchemeFromUserFirestore, 
+  saveApplicationToFirestore, 
+  db 
+} from './firebase';
+import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
+import { collection, onSnapshot } from 'firebase/firestore';
 
 export default function App() {
   const [currentLanguage, setCurrentLanguage] = useState<SupportedLanguage>('en');
@@ -50,6 +62,9 @@ export default function App() {
   const [isEntitlementCardOpen, setIsEntitlementCardOpen] = useState(false);
   const [isComparisonOpen, setIsComparisonOpen] = useState(false);
   const [comparisonInitialId, setComparisonInitialId] = useState<string | undefined>(undefined);
+  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
+  const [savedSchemes, setSavedSchemes] = useState<Array<{ schemeId: string; schemeTitle: string; savedAt: string }>>([]);
+  const [isSavedSchemesOpen, setIsSavedSchemesOpen] = useState(false);
 
   // Default active profile (Sunita Sharma, Vijay Nagar Ward 72, Urban IMC)
   const [citizenProfile, setCitizenProfile] = useState<CitizenProfile>({
@@ -129,6 +144,79 @@ export default function App() {
     };
   }, []);
 
+  // Firebase Auth State Listener
+  useEffect(() => {
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      setFirebaseUser(user);
+      if (user) {
+        setCitizenProfile(prev => ({
+          ...prev,
+          fullName: user.displayName || prev.fullName,
+        }));
+      } else {
+        setSavedSchemes([]);
+      }
+    });
+
+    return () => unsubscribeAuth();
+  }, []);
+
+  // Firestore Real-Time Saved Schemes Listener
+  useEffect(() => {
+    if (!firebaseUser) return;
+
+    const savedSchemesCol = collection(db, 'users', firebaseUser.uid, 'savedSchemes');
+    const unsubscribeSaved = onSnapshot(savedSchemesCol, (snapshot) => {
+      const items = snapshot.docs.map(docSnap => ({
+        schemeId: docSnap.id,
+        schemeTitle: (docSnap.data().schemeTitle as string) || docSnap.id,
+        savedAt: (docSnap.data().savedAt as string) || new Date().toISOString(),
+      }));
+      setSavedSchemes(items);
+    }, (err) => {
+      console.warn('Firestore saved schemes snapshot error:', err);
+    });
+
+    return () => unsubscribeSaved();
+  }, [firebaseUser]);
+
+  const handleGoogleSignIn = async () => {
+    try {
+      await signInWithGoogle();
+    } catch (err) {
+      console.error('Google Sign-In failed:', err);
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await logOutUser();
+    } catch (err) {
+      console.error('Sign-Out failed:', err);
+    }
+  };
+
+  const handleToggleSaveScheme = async (scheme: Scheme) => {
+    if (!firebaseUser) {
+      try {
+        const user = await signInWithGoogle();
+        if (user) {
+          await saveSchemeToUserFirestore(user.uid, scheme.id, scheme.title);
+        }
+      } catch (err) {
+        console.warn('Sign-in required to bookmark scheme:', err);
+      }
+      return;
+    }
+
+    const isAlreadySaved = savedSchemes.some(s => s.schemeId === scheme.id);
+    if (isAlreadySaved) {
+      await removeSavedSchemeFromUserFirestore(firebaseUser.uid, scheme.id);
+    } else {
+      await saveSchemeToUserFirestore(firebaseUser.uid, scheme.id, scheme.title);
+    }
+  };
+
   // Filter schemes according to active search query & selected governance level
   const filteredSchemes = searchSchemes(searchQuery, schemes, {
     levelFilter: selectedLevel,
@@ -188,6 +276,23 @@ export default function App() {
         const data = await res.json();
         if (data.record) {
           setApplications(prev => [data.record, ...prev]);
+
+          // Persist to user's Firestore cloud profile
+          if (firebaseUser) {
+            const targetScheme = SCHEMES_DATABASE.find(s => s.id === appData.schemeId);
+            saveApplicationToFirestore({
+              arn: data.record.arn,
+              schemeId: appData.schemeId,
+              schemeName: targetScheme ? targetScheme.title : 'Government Scheme',
+              applicantName: appData.applicantName,
+              applicantUid: firebaseUser.uid,
+              samagraId: appData.samagraMemberId,
+              wardNumber: citizenProfile.wardNumber,
+              status: 'Submitted',
+              appliedAt: new Date().toISOString(),
+              amountEstimated: targetScheme?.financialEntitlement?.amount || 0,
+            }).catch(err => console.warn('Firestore app sync warning:', err));
+          }
         }
       }
     } catch (e) {
@@ -267,6 +372,11 @@ export default function App() {
         onOpenSamagraModal={() => setActiveTab('samagra')}
         activeTab={activeTab}
         setActiveTab={setActiveTab}
+        firebaseUser={firebaseUser}
+        onGoogleSignIn={handleGoogleSignIn}
+        onSignOut={handleSignOut}
+        savedSchemesCount={savedSchemes.length}
+        onOpenSavedSchemes={() => setIsSavedSchemesOpen(true)}
       />
 
       {/* Main Tab Content */}
@@ -299,6 +409,8 @@ export default function App() {
                 setProfile={setCitizenProfile}
                 onApplyScheme={(scheme, prof) => setIntakeScheme(scheme)}
                 onNavigateToDigilocker={() => setActiveTab('digilocker')}
+                savedSchemeIds={savedSchemes.map(s => s.schemeId)}
+                onToggleSaveScheme={handleToggleSaveScheme}
               />
             </div>
           </div>
@@ -390,6 +502,23 @@ export default function App() {
         schemes={schemes}
         currentLanguage={currentLanguage}
         initialSchemeId={comparisonInitialId}
+      />
+
+      {/* Cloud Saved Schemes Modal (Firestore) */}
+      <SavedSchemesModal
+        isOpen={isSavedSchemesOpen}
+        onClose={() => setIsSavedSchemesOpen(false)}
+        savedSchemes={savedSchemes}
+        allSchemes={schemes}
+        onRemoveScheme={(schemeId) => {
+          if (firebaseUser) {
+            removeSavedSchemeFromUserFirestore(firebaseUser.uid, schemeId);
+          }
+        }}
+        onSelectScheme={(scheme) => {
+          setIntakeScheme(scheme);
+        }}
+        userEmail={firebaseUser?.email}
       />
 
       {/* Official Civic Footer */}

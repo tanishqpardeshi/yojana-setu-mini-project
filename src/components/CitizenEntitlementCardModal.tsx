@@ -10,7 +10,10 @@ import {
   IndianRupee, 
   Award, 
   MapPin, 
-  FileText 
+  FileText,
+  Share2,
+  Copy,
+  ExternalLink
 } from 'lucide-react';
 import { CitizenProfile, SchemeEligibilityResult, SupportedLanguage } from '../types';
 
@@ -29,6 +32,9 @@ export const CitizenEntitlementCardModal: React.FC<CitizenEntitlementCardModalPr
   eligibilityResults,
   currentLanguage,
 }) => {
+  const [copiedLink, setCopiedLink] = React.useState(false);
+  const [showQrDeepLinkModal, setShowQrDeepLinkModal] = React.useState(false);
+
   if (!isOpen) return null;
 
   const eligibleSchemes = eligibilityResults.filter(r => r.status === 'eligible');
@@ -49,32 +55,61 @@ export const CitizenEntitlementCardModal: React.FC<CitizenEntitlementCardModalPr
     return sum;
   }, 0);
 
+  const cardRef = 'YS-ENT-CARD-' + (profile.samagraMemberId || 'INDORE-2026');
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const verificationUrl = `${origin}/?verifyARN=${encodeURIComponent(cardRef)}`;
+
   const handlePrint = () => {
     window.print();
   };
 
-  const cardRef = 'YS-ENT-CARD-' + (profile.samagraMemberId || 'INDORE-2026');
+  const handleWhatsAppShare = () => {
+    const text = `🏛️ *YojanaSetu Indore - शासकीय नागरिक पात्रता पत्रक*\n\n` +
+      `👤 *नागरिक / Citizen:* ${profile.fullName}\n` +
+      `📜 *कुल पात्र योजनाएं / Qualified Schemes:* ${totalQualifiedCount} (${eligibleSchemes.length} Fully Eligible)\n` +
+      `💰 *वार्षिक प्रत्यक्ष लाभ / Annual Cash Entitlement:* ₹${annualCashTotal.toLocaleString('en-IN')}/वर्ष\n` +
+      `🏢 *क्षेत्र / Jurisdiction:* ${profile.areaType === 'urban' ? `Indore Ward ${profile.wardNumber || 'IMC'}` : `${profile.blockName || 'Janpad'}`}\n` +
+      `🆔 *प्रमाण-पत्र क्रमांक / Certificate ID:* ${cardRef}\n\n` +
+      `🔍 *ऑनलाइन सत्यापन लिंक / Verify Online:* ${verificationUrl}`;
+    
+    const shareUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+    window.open(shareUrl, '_blank');
+  };
+
+  const handleCopyLink = () => {
+    navigator.clipboard?.writeText(verificationUrl);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2500);
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm overflow-y-auto">
       <div className="bg-white rounded-3xl max-w-3xl w-full border border-slate-200 shadow-2xl overflow-hidden my-6">
         {/* Modal Top Actions */}
-        <div className="p-4 bg-slate-900 text-white flex justify-between items-center no-print border-b border-slate-800">
+        <div className="p-4 bg-slate-900 text-white flex flex-wrap justify-between items-center gap-2 no-print border-b border-slate-800">
           <div className="flex items-center space-x-2 text-xs font-semibold">
             <Award className="w-4 h-4 text-amber-400" />
             <span>Official Citizen Entitlement Certificate • Indore District</span>
           </div>
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-2 flex-wrap">
+            <button
+              onClick={handleWhatsAppShare}
+              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition flex items-center space-x-1.5 shadow-sm cursor-pointer"
+              title="Share Entitlement Card on WhatsApp"
+            >
+              <Share2 className="w-3.5 h-3.5" />
+              <span>Share on WhatsApp (व्हाट्सएप)</span>
+            </button>
             <button
               onClick={handlePrint}
-              className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold rounded-xl transition flex items-center space-x-1.5 shadow-sm"
+              className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold rounded-xl transition flex items-center space-x-1.5 shadow-sm cursor-pointer"
             >
               <Printer className="w-3.5 h-3.5" />
               <span>Print / Save PDF</span>
             </button>
             <button
               onClick={onClose}
-              className="p-1.5 hover:bg-white/10 text-slate-300 hover:text-white rounded-xl transition"
+              className="p-1.5 hover:bg-white/10 text-slate-300 hover:text-white rounded-xl transition cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -226,16 +261,32 @@ export const CitizenEntitlementCardModal: React.FC<CitizenEntitlementCardModalPr
             {/* Digital Seal & Signature Footer */}
             <div className="mt-6 pt-4 border-t border-slate-200 flex flex-col sm:flex-row justify-between items-center gap-4 text-xs">
               <div className="flex items-center space-x-3">
-                <div className="w-14 h-14 bg-slate-100 border border-slate-300 rounded-xl flex items-center justify-center p-1">
-                  <QrCode className="w-11 h-11 text-slate-800" />
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowQrDeepLinkModal(true)}
+                  className="w-14 h-14 bg-slate-100 hover:bg-amber-50 border border-slate-300 hover:border-amber-400 rounded-xl flex flex-col items-center justify-center p-1 cursor-pointer transition group"
+                  title="Click to view digital QR Verification & Deep-Link"
+                >
+                  <QrCode className="w-10 h-10 text-slate-800 group-hover:text-amber-700" />
+                  <span className="text-[8px] font-bold text-amber-700 group-hover:underline">Verify</span>
+                </button>
                 <div className="text-[10px] text-slate-500">
                   <div className="font-bold text-slate-800 flex items-center space-x-1">
                     <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
                     <span>NIC Digital Signature Authenticated</span>
                   </div>
                   <div>SHA-256: 4d92a188e993bbf0912</div>
-                  <div>Verify at: yojanasetu.indore.gov.in/verify</div>
+                  <div className="flex items-center space-x-1 mt-0.5">
+                    <span className="font-mono text-slate-700 font-semibold">{cardRef}</span>
+                    <button
+                      type="button"
+                      onClick={handleCopyLink}
+                      className="text-amber-700 hover:text-amber-900 font-bold ml-1 flex items-center space-x-0.5"
+                    >
+                      <Copy className="w-3 h-3" />
+                      <span>{copiedLink ? 'Copied!' : 'Copy Link'}</span>
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -248,16 +299,91 @@ export const CitizenEntitlementCardModal: React.FC<CitizenEntitlementCardModalPr
           </div>
         </div>
 
-        {/* Modal Bottom Close */}
-        <div className="p-4 bg-white border-t border-slate-200 flex justify-end no-print">
-          <button
-            onClick={onClose}
-            className="px-5 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 text-xs font-bold rounded-xl transition"
-          >
-            Close
-          </button>
+        {/* Modal Bottom Actions */}
+        <div className="p-4 bg-white border-t border-slate-200 flex flex-wrap justify-between items-center gap-2 no-print">
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={handleWhatsAppShare}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition flex items-center space-x-1.5 shadow-xs cursor-pointer"
+            >
+              <Share2 className="w-3.5 h-3.5" />
+              <span>Share on WhatsApp (व्हाट्सएप पर साझा करें)</span>
+            </button>
+            <button
+              onClick={handleCopyLink}
+              className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition flex items-center space-x-1 border border-slate-200 cursor-pointer"
+            >
+              <Copy className="w-3.5 h-3.5" />
+              <span>{copiedLink ? 'Link Copied!' : 'Copy Verification URL'}</span>
+            </button>
+          </div>
+
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={handlePrint}
+              className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold rounded-xl transition flex items-center space-x-1.5 cursor-pointer"
+            >
+              <Printer className="w-3.5 h-3.5" />
+              <span>Print</span>
+            </button>
+            <button
+              onClick={onClose}
+              className="px-5 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 text-xs font-bold rounded-xl transition cursor-pointer"
+            >
+              Close
+            </button>
+          </div>
         </div>
       </div>
+
+      {/* QR Verification Modal */}
+      {showQrDeepLinkModal && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 text-center space-y-4">
+            <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto text-amber-600">
+              <QrCode className="w-10 h-10" />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-slate-900">Digital Certificate Verification</h3>
+              <p className="text-xs text-slate-500 mt-1">
+                Scan or share this authenticated deep link to verify citizen entitlement records in the Indore Collectorate database.
+              </p>
+            </div>
+
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-left text-xs font-mono break-all space-y-1">
+              <div className="text-[10px] uppercase font-bold text-slate-400 font-sans">Deep Link Verification URL</div>
+              <div className="text-slate-800 font-semibold">{verificationUrl}</div>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={handleCopyLink}
+                className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-xl border border-slate-300 transition flex items-center justify-center space-x-1"
+              >
+                <Copy className="w-3.5 h-3.5" />
+                <span>{copiedLink ? 'Copied!' : 'Copy Link'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleWhatsAppShare}
+                className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition flex items-center justify-center space-x-1"
+              >
+                <Share2 className="w-3.5 h-3.5" />
+                <span>WhatsApp</span>
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowQrDeepLinkModal(false)}
+              className="text-xs font-bold text-slate-500 hover:text-slate-800 pt-2"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
