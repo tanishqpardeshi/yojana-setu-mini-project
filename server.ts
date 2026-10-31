@@ -8,7 +8,8 @@ import { dbService } from './server/db.js';
 import { 
   buildSchemeChunks, 
   hybridRagSearch, 
-  formatRagContextForPrompt 
+  formatRagContextForPrompt,
+  generateLocalMitraAnswer
 } from './src/utils/ragEngine.js';
 import { 
   ApplicationRecord, 
@@ -463,13 +464,7 @@ Always give crisp, compassionate, structured answers with:
   }
 
   // Graceful RAG-grounded response fallback when API key is not configured or network error
-  let fallbackReply = '';
-  if (retrievedChunks.length > 0) {
-    const topChunk = retrievedChunks[0].chunk;
-    fallbackReply = `**${topChunk.schemeTitle} (${topChunk.schemeTitleHindi})**\n\n${topChunk.content}\n\n💡 **अधिक जानकारी या आवेदन हेतु:** अपने नजदीकी एमपी ऑनलाइन / सीएससी कियोस्क या इंदौर कलेक्ट्रेट/वार्ड कार्यालय से संपर्क करें।`;
-  } else {
-    fallbackReply = `**नमस्ते! मैं 'योजना सेतु' का योजना मित्र हूँ।**\n\nइंदौर जिले में कुल **6 प्रशासनिक स्तरों** की योजनाएं संचालित हैं:\n1. **अंतर्राष्ट्रीय (ADB):** वार्डों में निःशुल्क नल कनेक्शन अनुदान।\n2. **राष्ट्रीय:** पीएम-किसान, पीएम आवास, आयुष्मान भारत (₹5 लाख मुफ्त इलाज)।\n3. **म.प्र. राज्य:** लाड़ली बहना (₹1,500/माह), सीखो कमाओ, संबल 2.0।\n4. **इंदौर कलेक्ट्रेट:** रेड क्रॉस आरोग्य निधि (₹1 लाख त्वरित चिकित्सा), अहिल्या दिव्यांग कोष।\n5. **नगर निगम (वार्ड 1-85):** स्वच्छता मित्र कल्याण, रूफटॉप सोलर ₹10,000 टॉप-अप।\n6. **ग्रामीण जनपद (महू, सांवेर, देपालपुर, इंदौर):** मालवी गोवंश व प्याज भंडारण सब्सिडी।`;
-  }
+  const fallbackReply = generateLocalMitraAnswer(message, retrievedChunks, 'hi');
 
   res.json({
     reply: fallbackReply,

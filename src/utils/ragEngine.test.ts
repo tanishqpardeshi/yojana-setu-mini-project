@@ -5,7 +5,8 @@ import {
   hybridRagSearch, 
   tokenizeText, 
   expandQueryWithSynonyms,
-  formatRagContextForPrompt 
+  formatRagContextForPrompt,
+  generateLocalMitraAnswer
 } from './ragEngine.ts';
 import { SCHEMES_DATABASE } from '../data/schemesData.ts';
 
@@ -61,3 +62,25 @@ test('formatRagContextForPrompt builds structured citation context', () => {
   assert.ok(formatted.includes('### Source [Citation 1]'));
   assert.ok(formatted.includes('Confidence:'));
 });
+
+test('hybridRagSearch computes vector cosine similarity and BM25 scores', () => {
+  const chunks = buildSchemeChunks(SCHEMES_DATABASE);
+  const results = hybridRagSearch('PM SVANidhi street vendor loan Indore', chunks, 2);
+  assert.ok(results.length > 0);
+  assert.ok(typeof results[0].cosineSimilarity === 'number');
+  assert.ok(typeof results[0].bm25Score === 'number');
+  assert.ok(results[0].cosineSimilarity >= 0);
+  assert.ok(results[0].bm25Score >= 0);
+});
+
+test('generateLocalMitraAnswer generates grounded civic advice with citations', () => {
+  const chunks = buildSchemeChunks(SCHEMES_DATABASE);
+  const results = hybridRagSearch('लाड़ली बहना', chunks, 2);
+  const hindiAnswer = generateLocalMitraAnswer('लाड़ली बहना', results, 'hi');
+  assert.ok(hindiAnswer.includes('लाड़ली बहना') || hindiAnswer.includes('Ladli Behna'));
+  assert.ok(hindiAnswer.includes('समग्र') || hindiAnswer.includes('ई-केवाईसी'));
+
+  const enAnswer = generateLocalMitraAnswer('Ladli Behna', results, 'en');
+  assert.ok(enAnswer.includes('Administrative Level:') || enAnswer.includes('Ladli Behna'));
+});
+

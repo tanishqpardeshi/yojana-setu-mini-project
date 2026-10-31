@@ -215,10 +215,12 @@ export interface RagChunk {
 
 export interface RagSearchResult {
   chunk: RagChunk;
-  score: number; // 0 to 1
+  score: number; // Hybrid combined score
   matchedTerms: string[];
   sourceLevel: string;
   confidencePercent: number; // e.g. 94%
+  bm25Score?: number;
+  cosineSimilarity?: number;
 }
 
 export interface RagQueryResponse {
