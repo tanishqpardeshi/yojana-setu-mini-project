@@ -1,17 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Building2, 
-  Search, 
-  Sparkles, 
-  CheckCircle, 
-  AlertCircle, 
-  ShieldCheck, 
-  ArrowRight, 
-  MapPin, 
-  PhoneCall,
-  User,
-  HeartHandshake
-} from 'lucide-react';
+import { Building2, ShieldCheck } from 'lucide-react';
 import { 
   SupportedLanguage, 
   UserMode, 
@@ -21,10 +9,11 @@ import {
   LiveNotification, 
   FamilyMember, 
   SamagraFamily,
-  GovernanceLevel 
+  GovernanceLevel,
+  JanpadBlock,
 } from './types';
 import { SCHEMES_DATABASE } from './data/schemesData';
-import { INITIAL_APPLICATION_RECORDS, INITIAL_NOTIFICATIONS, MOCK_SAMAGRA_FAMILIES } from './data/samagraMockProfiles';
+import { INITIAL_APPLICATION_RECORDS, INITIAL_NOTIFICATIONS } from './data/samagraMockProfiles';
 import { searchSchemes } from './utils/searchEngine';
 import { rankSchemesForCitizen } from './utils/rulesEngine';
 import { Header } from './components/Header';
@@ -41,14 +30,21 @@ import { ApplicationIntakeModal } from './components/ApplicationIntakeModal';
 import { CitizenEntitlementCardModal } from './components/CitizenEntitlementCardModal';
 import { SchemeComparisonModal } from './components/SchemeComparisonModal';
 import { SavedSchemesModal } from './components/SavedSchemesModal';
-import { 
-  auth, 
-  signInWithGoogle, 
-  logOutUser, 
-  saveSchemeToUserFirestore, 
-  removeSavedSchemeFromUserFirestore, 
-  saveApplicationToFirestore, 
-  db 
+import { AuthPage } from './components/AuthPage';
+import {
+  auth,
+  AuthResult,
+  fetchUserProfileFromFirestore,
+  handleFirestoreError,
+  logOutUser,
+  mapUserProfileToCitizenProfile,
+  OperationType,
+  removeSavedSchemeFromUserFirestore,
+  saveApplicationToFirestore,
+  saveSchemeToUserFirestore,
+  updateCitizenProfileInFirestore,
+  UserProfileDoc,
+  db,
 } from './firebase';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { collection, onSnapshot } from 'firebase/firestore';
@@ -63,6 +59,8 @@ export default function App() {
   const [isComparisonOpen, setIsComparisonOpen] = useState(false);
   const [comparisonInitialId, setComparisonInitialId] = useState<string | undefined>(undefined);
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
+  const [userProfileDoc, setUserProfileDoc] = useState<UserProfileDoc | null>(null);
+  const [authBannerMessage, setAuthBannerMessage] = useState<string | null>(null);
   const [savedSchemes, setSavedSchemes] = useState<Array<{ schemeId: string; schemeTitle: string; savedAt: string }>>([]);
   const [isSavedSchemesOpen, setIsSavedSchemesOpen] = useState(false);
 
@@ -144,16 +142,32 @@ export default function App() {
     };
   }, []);
 
-  // Firebase Auth State Listener
+  // Firebase Auth State Listener & Firestore UserProfile Hydration
   useEffect(() => {
-    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+    const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
       setFirebaseUser(user);
       if (user) {
-        setCitizenProfile(prev => ({
-          ...prev,
-          fullName: user.displayName || prev.fullName,
-        }));
+        setAuthBannerMessage(null);
+        try {
+          const docData = await fetchUserProfileFromFirestore(user.uid);
+          if (docData) {
+            setUserProfileDoc(docData);
+            setCitizenProfile(prev => mapUserProfileToCitizenProfile(docData, prev));
+          } else {
+            setCitizenProfile(prev => ({
+              ...prev,
+              fullName: user.displayName || prev.fullName,
+            }));
+          }
+        } catch (err) {
+          console.warn('Could not load Firestore user profile:', err);
+          setCitizenProfile(prev => ({
+            ...prev,
+            fullName: user.displayName || prev.fullName,
+          }));
+        }
       } else {
+        setUserProfileDoc(null);
         setSavedSchemes([]);
       }
     });
@@ -165,32 +179,45 @@ export default function App() {
   useEffect(() => {
     if (!firebaseUser) return;
 
+    const savedPath = `users/${firebaseUser.uid}/savedSchemes`;
     const savedSchemesCol = collection(db, 'users', firebaseUser.uid, 'savedSchemes');
-    const unsubscribeSaved = onSnapshot(savedSchemesCol, (snapshot) => {
-      const items = snapshot.docs.map(docSnap => ({
-        schemeId: docSnap.id,
-        schemeTitle: (docSnap.data().schemeTitle as string) || docSnap.id,
-        savedAt: (docSnap.data().savedAt as string) || new Date().toISOString(),
-      }));
-      setSavedSchemes(items);
-    }, (err) => {
-      console.warn('Firestore saved schemes snapshot error:', err);
-    });
+    const unsubscribeSaved = onSnapshot(
+      savedSchemesCol,
+      (snapshot) => {
+        const items = snapshot.docs.map(docSnap => ({
+          schemeId: docSnap.id,
+          schemeTitle: (docSnap.data().schemeTitle as string) || docSnap.id,
+          savedAt: (docSnap.data().savedAt as string) || new Date().toISOString(),
+        }));
+        setSavedSchemes(items);
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.LIST, savedPath);
+      }
+    );
 
     return () => unsubscribeSaved();
   }, [firebaseUser]);
 
-  const handleGoogleSignIn = async () => {
-    try {
-      await signInWithGoogle();
-    } catch (err) {
-      console.error('Google Sign-In failed:', err);
-    }
+  const handleAuthSuccess = (result: AuthResult) => {
+    setFirebaseUser(result.user);
+    setUserProfileDoc(result.profile);
+    setCitizenProfile(prev => mapUserProfileToCitizenProfile(result.profile, prev));
+    setAuthBannerMessage(null);
+  };
+
+  const handleUpdateCitizenProfileInCloud = async (updates: Partial<UserProfileDoc>) => {
+    if (!firebaseUser) return;
+    const updatedDoc = await updateCitizenProfileInFirestore(firebaseUser.uid, updates);
+    setUserProfileDoc(updatedDoc);
+    setCitizenProfile(prev => mapUserProfileToCitizenProfile(updatedDoc, prev));
   };
 
   const handleSignOut = async () => {
     try {
       await logOutUser();
+      setUserProfileDoc(null);
+      setAuthBannerMessage(null);
     } catch (err) {
       console.error('Sign-Out failed:', err);
     }
@@ -198,22 +225,21 @@ export default function App() {
 
   const handleToggleSaveScheme = async (scheme: Scheme) => {
     if (!firebaseUser) {
-      try {
-        const user = await signInWithGoogle();
-        if (user) {
-          await saveSchemeToUserFirestore(user.uid, scheme.id, scheme.title);
-        }
-      } catch (err) {
-        console.warn('Sign-in required to bookmark scheme:', err);
-      }
+      setAuthBannerMessage(`Sign in or register as a citizen to bookmark "${scheme.title}" to your cloud profile.`);
+      setActiveTab('auth');
       return;
     }
 
-    const isAlreadySaved = savedSchemes.some(s => s.schemeId === scheme.id);
-    if (isAlreadySaved) {
-      await removeSavedSchemeFromUserFirestore(firebaseUser.uid, scheme.id);
-    } else {
-      await saveSchemeToUserFirestore(firebaseUser.uid, scheme.id, scheme.title);
+    try {
+      const isAlreadySaved = savedSchemes.some(s => s.schemeId === scheme.id);
+      if (isAlreadySaved) {
+        await removeSavedSchemeFromUserFirestore(firebaseUser.uid, scheme.id);
+      } else {
+        await saveSchemeToUserFirestore(firebaseUser.uid, scheme.id, scheme.title);
+      }
+    } catch (err) {
+      console.error('Failed to update saved scheme in Firestore:', err);
+      setAuthBannerMessage('Could not update saved scheme in cloud storage. Please try again.');
     }
   };
 
@@ -222,17 +248,28 @@ export default function App() {
     levelFilter: selectedLevel,
   });
 
-  // Handle member selection from Samagra Family tree
-  const handleSelectMemberForProfile = (member: FamilyMember, family: SamagraFamily) => {
-    setCitizenProfile({
+  // Build CitizenProfile from a Samagra Family member selection
+  const applySamagraMemberToProfile = (member: FamilyMember, family: SamagraFamily): CitizenProfile => {
+    const wardMatch = family.wardOrBlock?.match(/ward\s*(\d+)/i);
+    const parsedWard = wardMatch ? Math.min(85, Math.max(1, Number(wardMatch[1]))) : 72;
+    const blockLower = (family.wardOrBlock || '').toLowerCase();
+    const parsedBlock: JanpadBlock = blockLower.includes('depalpur')
+      ? 'Depalpur'
+      : blockLower.includes('mhow')
+      ? 'Mhow'
+      : blockLower.includes('sanwer')
+      ? 'Sanwer'
+      : 'Indore';
+
+    const nextProfile: CitizenProfile = {
       fullName: member.name,
       age: member.age,
       gender: member.gender,
       category: family.familyId === '84019283' ? 'ST' : family.familyId === '71203945' ? 'OBC' : 'GEN',
       areaType: family.areaType,
-      wardNumber: family.areaType === 'urban' ? 72 : undefined,
-      blockName: family.areaType === 'rural' ? (family.wardOrBlock.includes('Depalpur') ? 'Depalpur' : 'Mhow') : undefined,
-      annualIncome: member.annualIncome || (family.rationCardType === 'BPL' ? 120000 : 250000),
+      wardNumber: family.areaType === 'urban' ? parsedWard : undefined,
+      blockName: family.areaType === 'rural' ? parsedBlock : undefined,
+      annualIncome: member.annualIncome ?? (family.rationCardType === 'BPL' ? 120000 : 250000),
       occupation: member.occupation,
       landHoldingHectares: member.occupation === 'Farmer' ? 1.8 : 0,
       isBPL: family.rationCardType === 'BPL' || family.rationCardType === 'Antyodaya',
@@ -250,8 +287,58 @@ export default function App() {
         mp_domicile: { verified: true, source: 'digilocker', docNumber: 'MP-DOM-RSK' },
         khasra_b1: { verified: member.occupation === 'Farmer', source: 'mp_edistrict', docNumber: 'B1-142/1' },
       },
-    });
+    };
+    setCitizenProfile(nextProfile);
+    return nextProfile;
+  };
+
+  // Handle member selection from Samagra Family tree
+  const handleSelectMemberForProfile = (member: FamilyMember, family: SamagraFamily) => {
+    const nextProfile = applySamagraMemberToProfile(member, family);
+    if (firebaseUser) {
+      handleUpdateCitizenProfileInCloud({
+        displayName: nextProfile.fullName,
+        samagraFamilyId: family.familyId,
+        samagraMemberId: member.memberId,
+        samagraId: member.memberId,
+        areaType: nextProfile.areaType,
+        wardNumber: nextProfile.wardNumber,
+        blockName: nextProfile.blockName,
+        age: nextProfile.age,
+        gender: nextProfile.gender,
+        category: nextProfile.category,
+        annualIncome: nextProfile.annualIncome,
+        occupation: nextProfile.occupation,
+        isBPL: nextProfile.isBPL,
+        maritalStatus: nextProfile.maritalStatus,
+        ekycVerified: member.ekycStatus,
+      }).catch(err => console.warn('Firestore Samagra link sync warning:', err));
+    }
     setActiveTab('schemes');
+  };
+
+  // Handle Samagra ID Login inside AuthPage
+  const handleSamagraSessionLogin = async (member: FamilyMember, family: SamagraFamily) => {
+    const nextProfile = applySamagraMemberToProfile(member, family);
+    if (firebaseUser) {
+      await handleUpdateCitizenProfileInCloud({
+        displayName: nextProfile.fullName,
+        samagraFamilyId: family.familyId,
+        samagraMemberId: member.memberId,
+        samagraId: member.memberId,
+        areaType: nextProfile.areaType,
+        wardNumber: nextProfile.wardNumber,
+        blockName: nextProfile.blockName,
+        age: nextProfile.age,
+        gender: nextProfile.gender,
+        category: nextProfile.category,
+        annualIncome: nextProfile.annualIncome,
+        occupation: nextProfile.occupation,
+        isBPL: nextProfile.isBPL,
+        maritalStatus: nextProfile.maritalStatus,
+        ekycVerified: member.ekycStatus,
+      });
+    }
   };
 
   // Submit online application
@@ -272,27 +359,29 @@ export default function App() {
         body: JSON.stringify(appData),
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        if (data.record) {
-          setApplications(prev => [data.record, ...prev]);
+      if (!res.ok) {
+        throw new Error(`Application intake failed with status ${res.status}`);
+      }
 
-          // Persist to user's Firestore cloud profile
-          if (firebaseUser) {
-            const targetScheme = SCHEMES_DATABASE.find(s => s.id === appData.schemeId);
-            saveApplicationToFirestore({
-              arn: data.record.arn,
-              schemeId: appData.schemeId,
-              schemeName: targetScheme ? targetScheme.title : 'Government Scheme',
-              applicantName: appData.applicantName,
-              applicantUid: firebaseUser.uid,
-              samagraId: appData.samagraMemberId,
-              wardNumber: citizenProfile.wardNumber,
-              status: 'Submitted',
-              appliedAt: new Date().toISOString(),
-              amountEstimated: targetScheme?.financialEntitlement?.amount || 0,
-            }).catch(err => console.warn('Firestore app sync warning:', err));
-          }
+      const data = await res.json();
+      if (data.record) {
+        setApplications(prev => [data.record, ...prev]);
+
+        // Persist to user's Firestore cloud profile
+        if (firebaseUser) {
+          const targetScheme = SCHEMES_DATABASE.find(s => s.id === appData.schemeId);
+          saveApplicationToFirestore({
+            arn: data.record.arn,
+            schemeId: appData.schemeId,
+            schemeName: targetScheme ? targetScheme.title : 'Government Scheme',
+            applicantName: appData.applicantName,
+            applicantUid: firebaseUser.uid,
+            samagraId: appData.samagraMemberId,
+            wardNumber: appData.areaType === 'urban' ? citizenProfile.wardNumber : undefined,
+            status: 'Submitted',
+            appliedAt: new Date().toISOString(),
+            amountEstimated: targetScheme?.financialEntitlement?.amount || 0,
+          }).catch(err => console.warn('Firestore app sync warning:', err));
         }
       }
     } catch (e) {
@@ -373,7 +462,6 @@ export default function App() {
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         firebaseUser={firebaseUser}
-        onGoogleSignIn={handleGoogleSignIn}
         onSignOut={handleSignOut}
         savedSchemesCount={savedSchemes.length}
         onOpenSavedSchemes={() => setIsSavedSchemesOpen(true)}
@@ -475,6 +563,23 @@ export default function App() {
             }}
           />
         )}
+
+        {activeTab === 'auth' && (
+          <AuthPage
+            currentLanguage={currentLanguage}
+            firebaseUser={firebaseUser}
+            userProfileDoc={userProfileDoc}
+            citizenProfile={citizenProfile}
+            onAuthSuccess={handleAuthSuccess}
+            onSamagraSessionLogin={handleSamagraSessionLogin}
+            onUpdateCitizenProfile={handleUpdateCitizenProfileInCloud}
+            onSignOut={handleSignOut}
+            onNavigateTab={setActiveTab}
+            onOpenSavedSchemes={() => setIsSavedSchemesOpen(true)}
+            savedSchemesCount={savedSchemes.length}
+            authBannerMessage={authBannerMessage}
+          />
+        )}
       </main>
 
       {/* Online Application Intake Modal */}
@@ -512,7 +617,9 @@ export default function App() {
         allSchemes={schemes}
         onRemoveScheme={(schemeId) => {
           if (firebaseUser) {
-            removeSavedSchemeFromUserFirestore(firebaseUser.uid, schemeId);
+            removeSavedSchemeFromUserFirestore(firebaseUser.uid, schemeId).catch(err =>
+              console.error('Failed to remove saved scheme:', err)
+            );
           }
         }}
         onSelectScheme={(scheme) => {

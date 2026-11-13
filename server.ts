@@ -1,4 +1,4 @@
-import express, { Request, Response } from 'express';
+import express, { NextFunction, Request, Response } from 'express';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import path from 'path';
@@ -24,9 +24,15 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = Number(process.env.DEFAULT_APP_PORT) || 3000;
 
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
+app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
+  if (err && err.type === 'entity.parse.failed') {
+    return res.status(400).json({ error: 'Invalid JSON request body' });
+  }
+  next(err);
+});
 
 // Pre-build RAG index of all schemes from SQLite database
 let cachedSchemes: Scheme[] = dbService.getSchemes();
@@ -99,263 +105,384 @@ app.get('/api/stream/events', (req: Request, res: Response) => {
 
 // District Macro Stats
 app.get('/api/stats', (_req: Request, res: Response) => {
-  const stats = dbService.getDistrictStats();
-  res.json({ stats });
+  try {
+    const stats = dbService.getDistrictStats();
+    res.json({ stats });
+  } catch (err) {
+    console.error('[API /api/stats] Error:', err);
+    res.status(500).json({ error: 'Failed to load district statistics' });
+  }
 });
 
 // Notifications List
 app.get('/api/notifications', (req: Request, res: Response) => {
-  const limit = req.query.limit ? Number(req.query.limit) : 30;
-  const notifications = dbService.getNotifications(limit);
-  res.json({ notifications });
+  try {
+    const parsedLimit = req.query.limit ? Number(req.query.limit) : 30;
+    const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? Math.min(200, Math.floor(parsedLimit)) : 30;
+    const notifications = dbService.getNotifications(limit);
+    res.json({ notifications });
+  } catch (err) {
+    console.error('[API /api/notifications] Error:', err);
+    res.status(500).json({ error: 'Failed to load notifications' });
+  }
 });
 
 // Post Notification (Admin Broadcast)
 app.post('/api/notifications', (req: Request, res: Response) => {
-  const { type, message, messageHindi, wardOrBlock, amount, arn } = req.body;
-  const newNotif: LiveNotification = {
-    id: `notif-${Date.now()}`,
-    timestamp: 'Just now',
-    type: type || 'application_filed',
-    message: message || 'Administrative activity logged',
-    messageHindi: messageHindi || message,
-    wardOrBlock: wardOrBlock || 'Indore District',
-    amount: amount ? Number(amount) : undefined,
-    arn: arn || undefined,
-  };
-  broadcastNotification(newNotif);
-  res.status(201).json({ success: true, notification: newNotif });
+  try {
+    const { type, message, messageHindi, wardOrBlock, amount, arn } = req.body || {};
+    const parsedAmount = amount !== undefined ? Number(amount) : undefined;
+    const newNotif: LiveNotification = {
+      id: `notif-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      timestamp: 'Just now',
+      type: type || 'application_filed',
+      message: message || 'Administrative activity logged',
+      messageHindi: messageHindi || message || 'प्रशासनिक गतिविधि दर्ज',
+      wardOrBlock: wardOrBlock || 'Indore District',
+      amount: parsedAmount !== undefined && Number.isFinite(parsedAmount) ? parsedAmount : undefined,
+      arn: arn || undefined,
+    };
+    broadcastNotification(newNotif);
+    res.status(201).json({ success: true, notification: newNotif });
+  } catch (err) {
+    console.error('[API POST /api/notifications] Error:', err);
+    res.status(500).json({ error: 'Failed to broadcast notification' });
+  }
 });
 
 // ================= SCHEMES CRUD =================
 
 // Get Schemes (with optional level and search queries)
 app.get('/api/schemes', (req: Request, res: Response) => {
-  const level = req.query.level ? String(req.query.level) : undefined;
-  const search = req.query.q ? String(req.query.q) : undefined;
-  const schemes = dbService.getSchemes({ level, search });
-  res.json({ schemes, count: schemes.length });
+  try {
+    const level = req.query.level ? String(req.query.level) : undefined;
+    const search = req.query.q ? String(req.query.q) : undefined;
+    const schemes = dbService.getSchemes({ level, search });
+    res.json({ schemes, count: schemes.length });
+  } catch (err) {
+    console.error('[API GET /api/schemes] Error:', err);
+    res.status(500).json({ error: 'Failed to load schemes' });
+  }
 });
 
 // Get Scheme by ID
 app.get('/api/schemes/:id', (req: Request, res: Response) => {
-  const scheme = dbService.getSchemeById(req.params.id);
-  if (!scheme) {
-    return res.status(404).json({ error: 'Scheme not found' });
+  try {
+    const scheme = dbService.getSchemeById(req.params.id);
+    if (!scheme) {
+      return res.status(404).json({ error: 'Scheme not found' });
+    }
+    res.json({ scheme });
+  } catch (err) {
+    console.error('[API GET /api/schemes/:id] Error:', err);
+    res.status(500).json({ error: 'Failed to load scheme' });
   }
-  res.json({ scheme });
 });
 
 // Create/Insert Scheme
 app.post('/api/schemes', (req: Request, res: Response) => {
-  const scheme = req.body as Scheme;
-  if (!scheme.id || !scheme.title) {
-    return res.status(400).json({ error: 'Invalid scheme payload. id and title required.' });
+  try {
+    const scheme = (req.body || {}) as Scheme;
+    if (!scheme.id || !scheme.title) {
+      return res.status(400).json({ error: 'Invalid scheme payload. id and title required.' });
+    }
+    dbService.insertScheme(scheme);
+    refreshRagIndex();
+    res.status(201).json({ success: true, scheme });
+  } catch (err) {
+    console.error('[API POST /api/schemes] Error:', err);
+    res.status(500).json({ error: 'Failed to save scheme' });
   }
-  dbService.insertScheme(scheme);
-  refreshRagIndex();
-  res.status(201).json({ success: true, scheme });
 });
 
 // Update Scheme
 app.put('/api/schemes/:id', (req: Request, res: Response) => {
-  const scheme = req.body as Scheme;
-  scheme.id = req.params.id;
-  dbService.insertScheme(scheme);
-  refreshRagIndex();
-  res.json({ success: true, scheme });
+  try {
+    const scheme = (req.body || {}) as Scheme;
+    if (!scheme.title) {
+      return res.status(400).json({ error: 'Invalid scheme payload. title is required.' });
+    }
+    scheme.id = req.params.id;
+    dbService.insertScheme(scheme);
+    refreshRagIndex();
+    res.json({ success: true, scheme });
+  } catch (err) {
+    console.error('[API PUT /api/schemes/:id] Error:', err);
+    res.status(500).json({ error: 'Failed to update scheme' });
+  }
 });
 
 // Delete Scheme
 app.delete('/api/schemes/:id', (req: Request, res: Response) => {
-  const deleted = dbService.deleteScheme(req.params.id);
-  if (!deleted) {
-    return res.status(404).json({ error: 'Scheme not found or could not be deleted' });
+  try {
+    const deleted = dbService.deleteScheme(req.params.id);
+    if (!deleted) {
+      return res.status(404).json({ error: 'Scheme not found or could not be deleted' });
+    }
+    refreshRagIndex();
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[API DELETE /api/schemes/:id] Error:', err);
+    res.status(500).json({ error: 'Failed to delete scheme' });
   }
-  refreshRagIndex();
-  res.json({ success: true });
 });
 
 // ================= APPLICATIONS CRUD =================
 
 // Get Applications (all, by ARN, or by Samagra ID)
 app.get('/api/applications', (req: Request, res: Response) => {
-  const { arn, samagraId, status } = req.query;
-  const records = dbService.getApplications({
-    arn: arn ? String(arn) : undefined,
-    samagraId: samagraId ? String(samagraId) : undefined,
-    status: status ? String(status) : undefined,
-  });
+  try {
+    const { arn, samagraId, status } = req.query;
+    const records = dbService.getApplications({
+      arn: arn ? String(arn) : undefined,
+      samagraId: samagraId ? String(samagraId) : undefined,
+      status: status ? String(status) : undefined,
+    });
 
-  if (arn && records.length === 0) {
-    return res.status(404).json({ error: 'Application Reference Number (ARN) not found' });
-  }
-  if (arn) {
-    return res.json({ record: records[0] });
-  }
+    if (arn && records.length === 0) {
+      return res.status(404).json({ error: 'Application Reference Number (ARN) not found' });
+    }
+    if (arn) {
+      return res.json({ record: records[0] });
+    }
 
-  res.json({ records, count: records.length });
+    res.json({ records, count: records.length });
+  } catch (err) {
+    console.error('[API GET /api/applications] Error:', err);
+    res.status(500).json({ error: 'Failed to load applications' });
+  }
 });
 
 // Get Application by ARN
 app.get('/api/applications/:arn', (req: Request, res: Response) => {
-  const record = dbService.getApplicationByArn(req.params.arn);
-  if (!record) {
-    return res.status(404).json({ error: 'Application Reference Number (ARN) not found' });
+  try {
+    const record = dbService.getApplicationByArn(req.params.arn);
+    if (!record) {
+      return res.status(404).json({ error: 'Application Reference Number (ARN) not found' });
+    }
+    res.json({ record });
+  } catch (err) {
+    console.error('[API GET /api/applications/:arn] Error:', err);
+    res.status(500).json({ error: 'Failed to load application' });
   }
-  res.json({ record });
 });
 
 // Submit Application
 app.post('/api/applications', (req: Request, res: Response) => {
-  const {
-    schemeId,
-    applicantName,
-    samagraMemberId,
-    samagraFamilyId,
-    phone,
-    wardOrBlock,
-    areaType,
-    kioskOperatorCode,
-  } = req.body;
+  try {
+    const {
+      schemeId,
+      applicantName,
+      samagraMemberId,
+      samagraFamilyId,
+      phone,
+      wardOrBlock,
+      areaType,
+      kioskOperatorCode,
+    } = req.body || {};
 
-  if (!schemeId || !applicantName) {
-    return res.status(400).json({ error: 'Missing required application fields' });
+    if (!schemeId || !applicantName || !String(applicantName).trim()) {
+      return res.status(400).json({ error: 'Missing required application fields' });
+    }
+
+    const cleanSchemeId = String(schemeId).trim();
+    const cleanApplicantName = String(applicantName).trim();
+    const scheme = dbService.getSchemeById(cleanSchemeId) || cachedSchemes.find(s => s.id === cleanSchemeId);
+    const schemeTitle = scheme ? scheme.title : 'Government Scheme Application';
+    const schemeTitleHindi = scheme ? scheme.titleHindi : 'शासकीय योजना आवेदन';
+
+    let arn = `YS-IND-2026-${Math.floor(10000 + Math.random() * 90000)}`;
+    let attempts = 0;
+    while (dbService.getApplicationByArn(arn) && attempts < 10) {
+      arn = `YS-IND-2026-${Math.floor(10000 + Math.random() * 90000)}`;
+      attempts += 1;
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+
+    const newApp: ApplicationRecord = {
+      arn,
+      schemeId: cleanSchemeId,
+      schemeTitle,
+      schemeTitleHindi,
+      applicantName: cleanApplicantName,
+      samagraMemberId: samagraMemberId ? String(samagraMemberId).trim() : 'N/A',
+      samagraFamilyId: samagraFamilyId ? String(samagraFamilyId).trim() : 'N/A',
+      phone: phone ? String(phone).trim() : '98XXXXXXXX',
+      wardOrBlock: wardOrBlock ? String(wardOrBlock).trim() : 'Indore Urban',
+      areaType: areaType === 'rural' ? 'rural' : 'urban',
+      appliedDate: today,
+      currentStatus: 'submitted',
+      officerInCharge: 'Nodal Verification Officer, Indore Collectorate',
+      sanctionAmount: scheme?.financialEntitlement?.amount || 0,
+      kioskOperatorCode: kioskOperatorCode ? String(kioskOperatorCode).trim() : undefined,
+      remarks: 'Application successfully registered in SQLite database via YojanaSetu.',
+      timeline: [
+        {
+          title: 'Application Intake Submitted',
+          titleHindi: 'आवेदन सफलतापूर्वक दर्ज',
+          date: `${today} 11:30 AM`,
+          location: kioskOperatorCode ? `Kiosk ${kioskOperatorCode}` : 'YojanaSetu Direct Portal',
+          status: 'completed',
+          remarks: 'Digital acknowledgment generated. Forwarded for field verification.',
+        },
+        {
+          title: 'Ward / Panchayat Field Verification',
+          titleHindi: 'वार्ड / पंचायत भौतिक सत्यापन',
+          date: 'In Progress (Estimated: 2 working days)',
+          location: wardOrBlock || 'Indore Ward Office',
+          status: 'in_progress',
+          remarks: 'Patwari / Ward Officer biometric verification initiated.',
+        },
+        {
+          title: 'Collectorate Scrutiny & Approval',
+          titleHindi: 'कलेक्ट्रेट स्क्रूटनी व अनुमोदन',
+          date: 'Pending',
+          location: 'Collectorate Campus, Moti Tabela Indore',
+          status: 'pending',
+        },
+        {
+          title: 'Sanction Order Release',
+          titleHindi: 'स्वीकृति आदेश जारी',
+          date: 'Pending',
+          location: 'Departmental Directorate Indore',
+          status: 'pending',
+        },
+        {
+          title: 'Direct Benefit Transfer (DBT)',
+          titleHindi: 'डीबीटी बैंक अंतरण',
+          date: 'Pending',
+          location: 'Aadhaar-linked Bank Account',
+          status: 'pending',
+        },
+      ],
+    };
+
+    dbService.insertApplication(newApp);
+
+    // Broadcast to live stream
+    broadcastNotification({
+      id: `notif-${Date.now()}`,
+      timestamp: 'Just now',
+      type: 'application_filed',
+      message: `New application ${arn} registered for ${schemeTitle} by ${cleanApplicantName} (${newApp.wardOrBlock}).`,
+      messageHindi: `नवीन आवेदन ${arn}: ${cleanApplicantName} द्वारा ${schemeTitleHindi} हेतु दर्ज (${newApp.wardOrBlock})।`,
+      wardOrBlock: newApp.wardOrBlock || 'Indore',
+      arn,
+    });
+
+    res.status(201).json({ success: true, record: newApp });
+  } catch (err) {
+    console.error('[API POST /api/applications] Error:', err);
+    res.status(500).json({ error: 'Failed to submit application' });
   }
-
-  const scheme = dbService.getSchemeById(schemeId) || cachedSchemes.find(s => s.id === schemeId);
-  const schemeTitle = scheme ? scheme.title : 'Government Scheme Application';
-  const schemeTitleHindi = scheme ? scheme.titleHindi : 'शासकीय योजना आवेदन';
-
-  const randomNum = Math.floor(10000 + Math.random() * 90000);
-  const arn = `YS-IND-2026-${randomNum}`;
-  const today = new Date().toISOString().split('T')[0];
-
-  const newApp: ApplicationRecord = {
-    arn,
-    schemeId,
-    schemeTitle,
-    schemeTitleHindi,
-    applicantName,
-    samagraMemberId: samagraMemberId || 'N/A',
-    samagraFamilyId: samagraFamilyId || 'N/A',
-    phone: phone || '98XXXXXXXX',
-    wardOrBlock: wardOrBlock || 'Indore Urban',
-    areaType: areaType || 'urban',
-    appliedDate: today,
-    currentStatus: 'submitted',
-    officerInCharge: 'Nodal Verification Officer, Indore Collectorate',
-    sanctionAmount: scheme?.financialEntitlement?.amount || 0,
-    kioskOperatorCode: kioskOperatorCode || undefined,
-    remarks: 'Application successfully registered in SQLite database via YojanaSetu.',
-    timeline: [
-      {
-        title: 'Application Intake Submitted',
-        titleHindi: 'आवेदन सफलतापूर्वक दर्ज',
-        date: `${today} 11:30 AM`,
-        location: kioskOperatorCode ? `Kiosk ${kioskOperatorCode}` : 'YojanaSetu Direct Portal',
-        status: 'completed',
-        remarks: 'Digital acknowledgment generated. Forwarded for field verification.',
-      },
-      {
-        title: 'Ward / Panchayat Field Verification',
-        titleHindi: 'वार्ड / पंचायत भौतिक सत्यापन',
-        date: 'In Progress (Estimated: 2 working days)',
-        location: wardOrBlock || 'Indore Ward Office',
-        status: 'in_progress',
-        remarks: 'Patwari / Ward Officer biometric verification initiated.',
-      },
-      {
-        title: 'Collectorate Scrutiny & Approval',
-        titleHindi: 'कलेक्ट्रेट स्क्रूटनी व अनुमोदन',
-        date: 'Pending',
-        location: 'Collectorate Campus, Moti Tabela Indore',
-        status: 'pending',
-      },
-      {
-        title: 'Sanction Order Release',
-        titleHindi: 'स्वीकृति आदेश जारी',
-        date: 'Pending',
-        location: 'Departmental Directorate Indore',
-        status: 'pending',
-      },
-      {
-        title: 'Direct Benefit Transfer (DBT)',
-        titleHindi: 'डीबीटी बैंक अंतरण',
-        date: 'Pending',
-        location: 'Aadhaar-linked Bank Account',
-        status: 'pending',
-      },
-    ],
-  };
-
-  dbService.insertApplication(newApp);
-
-  // Broadcast to live stream
-  broadcastNotification({
-    id: `notif-${Date.now()}`,
-    timestamp: 'Just now',
-    type: 'application_filed',
-    message: `New application ${arn} registered for ${schemeTitle} by ${applicantName} (${wardOrBlock}).`,
-    messageHindi: `नवीन आवेदन ${arn}: ${applicantName} द्वारा ${schemeTitleHindi} हेतु दर्ज (${wardOrBlock})।`,
-    wardOrBlock: wardOrBlock || 'Indore',
-    arn,
-  });
-
-  res.status(201).json({ success: true, record: newApp });
 });
 
 // Update Application Status (e.g. Approved, DBT disbursed, etc.)
 app.patch('/api/applications/:arn', (req: Request, res: Response) => {
-  const { status, remarks } = req.body;
-  if (!status) {
-    return res.status(400).json({ error: 'Status is required' });
+  try {
+    const { status, remarks } = req.body || {};
+    if (!status || typeof status !== 'string') {
+      return res.status(400).json({ error: 'Status is required' });
+    }
+
+    const updated = dbService.updateApplicationStatus(req.params.arn, status, remarks);
+    if (!updated) {
+      return res.status(404).json({ error: 'Application not found' });
+    }
+
+    // Broadcast update
+    broadcastNotification({
+      id: `notif-${Date.now()}`,
+      timestamp: 'Just now',
+      type: status === 'dbt_disbursed' ? 'dbt_disbursed' : 'sanction_order',
+      message: `ARN ${updated.arn}: Status updated to ${status.toUpperCase()} for ${updated.applicantName}.`,
+      messageHindi: `आवेदन ${updated.arn}: स्थिति अद्यतित - ${status} (${updated.applicantName})।`,
+      wardOrBlock: updated.wardOrBlock,
+      amount: updated.sanctionAmount,
+      arn: updated.arn,
+    });
+
+    res.json({ success: true, record: updated });
+  } catch (err) {
+    console.error('[API PATCH /api/applications/:arn] Error:', err);
+    res.status(500).json({ error: 'Failed to update application status' });
   }
-
-  const updated = dbService.updateApplicationStatus(req.params.arn, status, remarks);
-  if (!updated) {
-    return res.status(404).json({ error: 'Application not found' });
-  }
-
-  // Broadcast update
-  broadcastNotification({
-    id: `notif-${Date.now()}`,
-    timestamp: 'Just now',
-    type: status === 'dbt_disbursed' ? 'dbt_disbursed' : 'sanction_order',
-    message: `ARN ${updated.arn}: Status updated to ${status.toUpperCase()} for ${updated.applicantName}.`,
-    messageHindi: `आवेदन ${updated.arn}: स्थिति अद्यतित - ${status} (${updated.applicantName})।`,
-    wardOrBlock: updated.wardOrBlock,
-    amount: updated.sanctionAmount,
-    arn: updated.arn,
-  });
-
-  res.json({ success: true, record: updated });
 });
 
 // ================= SAMAGRA INTEGRATION =================
 
 // Get Samagra Family Profile by Family ID or Member ID
 app.get('/api/samagra/:id', (req: Request, res: Response) => {
-  const family = dbService.getSamagraFamily(req.params.id);
-  if (!family) {
-    return res.status(404).json({ error: 'Samagra Family or Member ID not found in database' });
+  try {
+    const id = req.params.id?.trim();
+    if (!id) {
+      return res.status(400).json({ error: 'Samagra Family or Member ID is required' });
+    }
+    const family = dbService.getSamagraFamily(id);
+    if (!family) {
+      return res.status(404).json({ error: 'Samagra Family or Member ID not found in database' });
+    }
+    res.json({ family });
+  } catch (err) {
+    console.error('[API GET /api/samagra/:id] Error:', err);
+    res.status(500).json({ error: 'Failed to lookup Samagra family record' });
   }
-  res.json({ family });
+});
+
+// Register or sync a Citizen Samagra Family record
+app.post('/api/samagra/register', (req: Request, res: Response) => {
+  try {
+    const { familyId, headName, areaType, wardOrBlock, address, rationCardType, members } = req.body || {};
+    const cleanFamilyId = typeof familyId === 'string' || typeof familyId === 'number' ? String(familyId).trim() : '';
+    const cleanHeadName = typeof headName === 'string' ? headName.trim() : '';
+
+    if (!cleanFamilyId || !cleanHeadName || !Array.isArray(members) || members.length === 0) {
+      return res.status(400).json({ error: 'familyId, headName, and at least one member are required' });
+    }
+
+    const validMembers = members.every(
+      (m: any) => m && typeof m === 'object' && String(m.memberId || '').trim() && String(m.name || '').trim()
+    );
+    if (!validMembers) {
+      return res.status(400).json({ error: 'Each Samagra member must include a non-empty memberId and name' });
+    }
+
+    const saved = dbService.registerSamagraFamily({
+      familyId: cleanFamilyId.slice(0, 16),
+      headName: cleanHeadName.slice(0, 120),
+      areaType: areaType === 'rural' ? 'rural' : 'urban',
+      wardOrBlock: String(wardOrBlock || 'Ward 72 (Vijay Nagar)').slice(0, 100),
+      address: String(address || 'Indore District, Madhya Pradesh').slice(0, 300),
+      rationCardType: rationCardType === 'BPL' || rationCardType === 'Antyodaya' ? rationCardType : 'APL',
+      members,
+    });
+    res.status(201).json({ success: true, family: saved });
+  } catch (err) {
+    console.error('[API POST /api/samagra/register] Error:', err);
+    res.status(500).json({ error: 'Failed to register Samagra family record' });
+  }
 });
 
 // ================= HYBRID RAG SEARCH & CITATIONS =================
 
 // Standalone RAG Retrieval API endpoint
 app.get('/api/rag/search', (req: Request, res: Response) => {
-  const query = req.query.q ? String(req.query.q) : '';
-  const topK = req.query.topK ? Number(req.query.topK) : 4;
+  try {
+    const query = req.query.q ? String(req.query.q) : '';
+    const parsedTopK = req.query.topK ? Number(req.query.topK) : 4;
+    const topK = Number.isFinite(parsedTopK) && parsedTopK > 0 ? Math.min(20, Math.floor(parsedTopK)) : 4;
 
-  if (!query.trim()) {
-    return res.json({ query: '', results: [] });
+    if (!query.trim()) {
+      return res.json({ query: '', results: [] });
+    }
+
+    const results = hybridRagSearch(query, schemeRagChunks, topK);
+    res.json({ query, results, totalIndexedChunks: schemeRagChunks.length });
+  } catch (err) {
+    console.error('[API GET /api/rag/search] Error:', err);
+    res.status(500).json({ error: 'Failed to search RAG index' });
   }
-
-  const results = hybridRagSearch(query, schemeRagChunks, topK);
-  res.json({ query, results, totalIndexedChunks: schemeRagChunks.length });
 });
 
 // Gemini Chatbot: Yojana Mitra with Grounded RAG Citations

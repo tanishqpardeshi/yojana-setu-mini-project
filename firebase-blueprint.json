@@ -2,36 +2,54 @@
   "entities": {
     "UserProfile": {
       "title": "UserProfile",
-      "description": "User profile containing authentication details, role and demographic preferences",
+      "description": "Citizen or operator profile containing Firebase authentication details, Samagra linking, and Indore demographic attributes",
       "type": "object",
       "properties": {
-        "uid": { "type": "string" },
-        "email": { "type": "string" },
-        "displayName": { "type": "string" },
-        "photoURL": { "type": "string" },
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 160 },
+        "displayName": { "type": "string", "maxLength": 120 },
+        "photoURL": { "type": "string", "maxLength": 500 },
+        "phone": { "type": "string", "maxLength": 20 },
         "role": { "type": "string", "enum": ["citizen", "operator", "admin"] },
-        "samagraId": { "type": "string" },
+        "authMethod": { "type": "string", "enum": ["google", "email", "samagra"] },
+        "samagraId": { "type": "string", "maxLength": 16 },
+        "samagraFamilyId": { "type": "string", "maxLength": 16 },
+        "samagraMemberId": { "type": "string", "maxLength": 16 },
+        "areaType": { "type": "string", "enum": ["urban", "rural"] },
         "wardNumber": { "type": "number" },
-        "createdAt": { "type": "string" },
-        "updatedAt": { "type": "string" }
+        "blockName": { "type": "string", "maxLength": 40 },
+        "category": { "type": "string", "enum": ["SC", "ST", "OBC", "GEN", "EWS"] },
+        "age": { "type": "number" },
+        "gender": { "type": "string", "enum": ["female", "male", "transgender", "any"] },
+        "annualIncome": { "type": "number" },
+        "occupation": { "type": "string", "maxLength": 60 },
+        "isBPL": { "type": "boolean" },
+        "hasDisability": { "type": "boolean" },
+        "maritalStatus": { "type": "string", "maxLength": 20 },
+        "isMpDomicile": { "type": "boolean" },
+        "isIndoreResident": { "type": "boolean" },
+        "ekycVerified": { "type": "boolean" },
+        "createdAt": { "type": "string", "maxLength": 40 },
+        "updatedAt": { "type": "string", "maxLength": 40 },
+        "lastLoginAt": { "type": "string", "maxLength": 40 }
       },
-      "required": ["uid", "email", "role", "createdAt"]
+      "required": ["uid", "email", "displayName", "role", "createdAt"]
     },
     "CitizenApplication": {
       "title": "CitizenApplication",
       "description": "Government scheme application submitted by or for a citizen",
       "type": "object",
       "properties": {
-        "arn": { "type": "string" },
-        "schemeId": { "type": "string" },
-        "schemeName": { "type": "string" },
-        "applicantName": { "type": "string" },
-        "applicantUid": { "type": "string" },
-        "aadhaarLast4": { "type": "string" },
-        "samagraId": { "type": "string" },
+        "arn": { "type": "string", "maxLength": 64 },
+        "schemeId": { "type": "string", "maxLength": 64 },
+        "schemeName": { "type": "string", "maxLength": 200 },
+        "applicantName": { "type": "string", "maxLength": 120 },
+        "applicantUid": { "type": "string", "maxLength": 128 },
+        "aadhaarLast4": { "type": "string", "maxLength": 4 },
+        "samagraId": { "type": "string", "maxLength": 16 },
         "wardNumber": { "type": "number" },
         "status": { "type": "string", "enum": ["Submitted", "Under_Verification", "Field_Inspection", "Approved", "Disbursed", "Rejected"] },
-        "appliedAt": { "type": "string" },
+        "appliedAt": { "type": "string", "maxLength": 40 },
         "amountEstimated": { "type": "number" }
       },
       "required": ["arn", "schemeId", "applicantName", "applicantUid", "status", "appliedAt"]
@@ -41,9 +59,9 @@
       "description": "Bookmarked government scheme saved to user profile",
       "type": "object",
       "properties": {
-        "schemeId": { "type": "string" },
-        "schemeTitle": { "type": "string" },
-        "savedAt": { "type": "string" }
+        "schemeId": { "type": "string", "maxLength": 64 },
+        "schemeTitle": { "type": "string", "maxLength": 200 },
+        "savedAt": { "type": "string", "maxLength": 40 }
       },
       "required": ["schemeId", "savedAt"]
     },
@@ -52,10 +70,10 @@
       "description": "Official district broadcast or alert",
       "type": "object",
       "properties": {
-        "title": { "type": "string" },
-        "message": { "type": "string" },
+        "title": { "type": "string", "maxLength": 200 },
+        "message": { "type": "string", "maxLength": 1000 },
         "priority": { "type": "string", "enum": ["Normal", "Urgent", "Flash"] },
-        "createdAt": { "type": "string" }
+        "createdAt": { "type": "string", "maxLength": 40 }
       },
       "required": ["title", "message", "priority", "createdAt"]
     }
@@ -63,7 +81,7 @@
   "firestore": {
     "/users/{userId}": {
       "schema": "UserProfile",
-      "description": "User profile document"
+      "description": "User authentication & citizen demographic profile document"
     },
     "/users/{userId}/savedSchemes/{schemeId}": {
       "schema": "SavedScheme",
@@ -74,7 +92,7 @@
       "description": "Government scheme applications"
     },
     "/announcements/{announcementId}": {
-      "schema": "Announcement",
+      "schema": { "$ref": "Announcement" },
       "description": "District administrative broadcasts"
     }
   }

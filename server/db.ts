@@ -107,6 +107,15 @@ db.exec(`
   );
 `);
 
+function safeJsonParse<T>(raw: string | null | undefined, fallback: T): T {
+  if (!raw) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
 // Helper to convert DB row to Scheme model
 function rowToScheme(row: any): Scheme {
   return {
@@ -125,14 +134,14 @@ function rowToScheme(row: any): Scheme {
     benefits: row.benefits,
     benefitsHindi: row.benefits_hindi,
     financialEntitlement: {
-      amount: row.financial_amount,
-      frequency: row.financial_frequency,
-      description: row.financial_desc,
+      amount: Number(row.financial_amount) || 0,
+      frequency: row.financial_frequency || 'One-Time',
+      description: row.financial_desc || '',
     },
-    eligibilityRules: JSON.parse(row.eligibility_rules_json || '{}'),
-    requiredDocuments: JSON.parse(row.required_documents_json || '[]'),
-    tags: JSON.parse(row.tags_json || '[]'),
-    malwiSynonyms: JSON.parse(row.malwi_synonyms_json || '[]'),
+    eligibilityRules: safeJsonParse(row.eligibility_rules_json, {}),
+    requiredDocuments: safeJsonParse(row.required_documents_json, []),
+    tags: safeJsonParse(row.tags_json, []),
+    malwiSynonyms: safeJsonParse(row.malwi_synonyms_json, []),
     applyUrl: row.apply_url || undefined,
     cscAvailable: Boolean(row.csc_available),
     activeBudgetCr: row.active_budget_cr ? Number(row.active_budget_cr) : undefined,
@@ -158,7 +167,7 @@ function rowToApplication(row: any): ApplicationRecord {
     sanctionAmount: row.sanction_amount ? Number(row.sanction_amount) : 0,
     kioskOperatorCode: row.kiosk_operator_code || undefined,
     remarks: row.remarks || '',
-    timeline: JSON.parse(row.timeline_json || '[]'),
+    timeline: safeJsonParse(row.timeline_json, []),
   };
 }
 
@@ -385,28 +394,28 @@ export const dbService = {
 
     stmt.run({
       id: scheme.id,
-      code: scheme.code,
+      code: scheme.code || scheme.id.toUpperCase(),
       title: scheme.title,
-      titleHindi: scheme.titleHindi,
-      titleMalwi: scheme.titleMalwi,
-      governanceLevel: scheme.governanceLevel,
-      department: scheme.department,
-      nodalOfficeIndore: scheme.nodalOfficeIndore,
-      helpline: scheme.helpline,
-      targetBeneficiary: scheme.targetBeneficiary,
-      description: scheme.description,
-      descriptionHindi: scheme.descriptionHindi,
-      benefits: scheme.benefits,
-      benefitsHindi: scheme.benefitsHindi,
-      financialAmount: scheme.financialEntitlement.amount,
-      financialFrequency: scheme.financialEntitlement.frequency,
-      financialDesc: scheme.financialEntitlement.description,
-      eligibilityRulesJson: JSON.stringify(scheme.eligibilityRules),
-      requiredDocumentsJson: JSON.stringify(scheme.requiredDocuments),
-      tagsJson: JSON.stringify(scheme.tags),
-      malwiSynonymsJson: JSON.stringify(scheme.malwiSynonyms),
+      titleHindi: scheme.titleHindi || scheme.title,
+      titleMalwi: scheme.titleMalwi || scheme.titleHindi || scheme.title,
+      governanceLevel: scheme.governanceLevel || 'district_indore',
+      department: scheme.department || 'District Administration Indore',
+      nodalOfficeIndore: scheme.nodalOfficeIndore || 'Collectorate Campus Indore',
+      helpline: scheme.helpline || '181',
+      targetBeneficiary: scheme.targetBeneficiary || 'Citizens of Indore',
+      description: scheme.description || '',
+      descriptionHindi: scheme.descriptionHindi || scheme.description || '',
+      benefits: scheme.benefits || '',
+      benefitsHindi: scheme.benefitsHindi || scheme.benefits || '',
+      financialAmount: Number(scheme.financialEntitlement?.amount) || 0,
+      financialFrequency: scheme.financialEntitlement?.frequency || 'One-Time',
+      financialDesc: scheme.financialEntitlement?.description || '',
+      eligibilityRulesJson: JSON.stringify(scheme.eligibilityRules || {}),
+      requiredDocumentsJson: JSON.stringify(scheme.requiredDocuments || []),
+      tagsJson: JSON.stringify(scheme.tags || []),
+      malwiSynonymsJson: JSON.stringify(scheme.malwiSynonyms || []),
       applyUrl: scheme.applyUrl || null,
-      cscAvailable: scheme.cscAvailable ? 1 : 0,
+      cscAvailable: scheme.cscAvailable === false ? 0 : 1,
       activeBudgetCr: scheme.activeBudgetCr || null,
       updatedAt: new Date().toISOString(),
     });
@@ -513,13 +522,16 @@ export const dbService = {
 
   // Samagra Families
   getSamagraFamily(familyId: string): SamagraFamily | null {
-    const row = db.prepare('SELECT * FROM samagra_families WHERE family_id = ?').get(familyId.trim());
+    const cleanId = familyId.trim();
+    if (!cleanId) return null;
+
+    const row = db.prepare('SELECT * FROM samagra_families WHERE family_id = ?').get(cleanId);
     if (!row) {
       // Also check if member ID matches any member inside members_json
       const allRows = db.prepare('SELECT * FROM samagra_families').all() as any[];
       for (const r of allRows) {
-        const members = JSON.parse(r.members_json || '[]');
-        if (members.some((m: any) => m.memberId === familyId.trim())) {
+        const members = safeJsonParse<SamagraFamily['members']>(r.members_json, []);
+        if (members.some(m => String(m.memberId).trim() === cleanId)) {
           return {
             familyId: r.family_id,
             headName: r.head_name,
@@ -542,13 +554,57 @@ export const dbService = {
       wardOrBlock: r.ward_or_block,
       address: r.address,
       rationCardType: r.ration_card_type,
-      members: JSON.parse(r.members_json || '[]'),
+      members: safeJsonParse<SamagraFamily['members']>(r.members_json, []),
     };
+  },
+
+  registerSamagraFamily(family: SamagraFamily): SamagraFamily {
+    const cleanFamily: SamagraFamily = {
+      familyId: family.familyId.trim(),
+      headName: family.headName.trim(),
+      areaType: family.areaType === 'rural' ? 'rural' : 'urban',
+      wardOrBlock: family.wardOrBlock.trim(),
+      address: family.address.trim(),
+      rationCardType:
+        family.rationCardType === 'BPL' || family.rationCardType === 'Antyodaya'
+          ? family.rationCardType
+          : 'APL',
+      members: family.members.map(m => ({
+        ...m,
+        memberId: String(m.memberId).trim(),
+        name: String(m.name).trim(),
+        nameHindi: String(m.nameHindi || m.name).trim(),
+      })),
+    };
+
+    const stmt = db.prepare(`
+      INSERT OR REPLACE INTO samagra_families (
+        family_id, head_name, area_type, ward_or_block, address,
+        ration_card_type, members_json, created_at
+      ) VALUES (
+        @familyId, @headName, @areaType, @wardOrBlock, @address,
+        @rationCardType, @membersJson, @createdAt
+      )
+    `);
+
+    stmt.run({
+      familyId: cleanFamily.familyId,
+      headName: cleanFamily.headName,
+      areaType: cleanFamily.areaType,
+      wardOrBlock: cleanFamily.wardOrBlock,
+      address: cleanFamily.address,
+      rationCardType: cleanFamily.rationCardType,
+      membersJson: JSON.stringify(cleanFamily.members),
+      createdAt: new Date().toISOString(),
+    });
+
+    return cleanFamily;
   },
 
   // Notifications
   getNotifications(limit: number = 30): LiveNotification[] {
-    const rows = db.prepare('SELECT * FROM admin_broadcasts ORDER BY rowid DESC LIMIT ?').all(limit) as any[];
+    const safeLimit = Number.isFinite(limit) && limit > 0 ? Math.min(200, Math.floor(limit)) : 30;
+    const rows = db.prepare('SELECT * FROM admin_broadcasts ORDER BY rowid DESC LIMIT ?').all(safeLimit) as any[];
     return rows.map(r => ({
       id: r.id,
       timestamp: r.timestamp,
