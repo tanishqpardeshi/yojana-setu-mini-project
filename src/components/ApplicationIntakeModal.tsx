@@ -1,18 +1,11 @@
-import React, { useState } from 'react';
-import { 
-  Building2, 
-  CheckCircle, 
-  AlertCircle, 
-  ArrowRight, 
-  QrCode, 
-  X, 
-  FileText,
-  ShieldCheck,
-  User,
-  Phone,
-  MapPin
+import React, { useState, useEffect } from 'react';
+import {
+  AlertCircle,
+  ArrowRight,
+  X,
 } from 'lucide-react';
-import { Scheme, CitizenProfile, SupportedLanguage } from '../types';
+import { Scheme, CitizenProfile } from '../types';
+import { IMC_WARDS } from '../data/indoreGovernance';
 
 interface ApplicationIntakeModalProps {
   scheme: Scheme | null;
@@ -37,43 +30,76 @@ export const ApplicationIntakeModal: React.FC<ApplicationIntakeModalProps> = ({
   onClose,
   onSubmit,
 }) => {
-  if (!isOpen || !scheme) return null;
+  const computeDefaultWardOrBlock = () => {
+    if (profile.areaType === 'urban') {
+      const ward = IMC_WARDS.find(w => w.number === (profile.wardNumber || 1));
+      return `Ward ${profile.wardNumber || 1} (${ward?.name || 'Indore IMC'})`;
+    }
+    return `${profile.blockName || 'Indore'} Janpad`;
+  };
 
-  const [applicantName, setApplicantName] = useState(profile.fullName || 'Sunita Sharma');
-  const [phone, setPhone] = useState('9826012345');
-  const [samagraFamilyId, setSamagraFamilyId] = useState(profile.samagraFamilyId || '48921840');
-  const [samagraMemberId, setSamagraMemberId] = useState(profile.samagraMemberId || '109283742');
-  const [wardOrBlock, setWardOrBlock] = useState(
-    profile.areaType === 'urban'
-      ? `Ward ${profile.wardNumber || 72} (Vijay Nagar)`
-      : `${profile.blockName || 'Depalpur'} Janpad`
-  );
+  const [applicantName, setApplicantName] = useState(profile.fullName || '');
+  const [phone, setPhone] = useState(profile.phone || '');
+  const [samagraFamilyId, setSamagraFamilyId] = useState(profile.samagraFamilyId || '');
+  const [samagraMemberId, setSamagraMemberId] = useState(profile.samagraMemberId || '');
+  const [wardOrBlock, setWardOrBlock] = useState(computeDefaultWardOrBlock);
   const [consentChecked, setConsentChecked] = useState(true);
+  const [validationError, setValidationError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setApplicantName(profile.fullName || '');
+      setPhone(profile.phone || '');
+      setSamagraFamilyId(profile.samagraFamilyId || '');
+      setSamagraMemberId(profile.samagraMemberId || '');
+      setWardOrBlock(computeDefaultWardOrBlock());
+      setConsentChecked(true);
+      setValidationError(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, scheme?.id, profile.fullName, profile.samagraFamilyId, profile.samagraMemberId, profile.wardNumber, profile.blockName, profile.areaType]);
+
+  if (!isOpen || !scheme) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setValidationError(null);
+
+    if (!applicantName.trim()) {
+      setValidationError('Applicant full name is required.');
+      return;
+    }
+    if (!samagraFamilyId.trim() || !samagraMemberId.trim()) {
+      setValidationError('Valid Samagra Family ID and Member ID are required for application intake.');
+      return;
+    }
+    if (!phone.trim() || phone.trim().length < 10) {
+      setValidationError('Please enter a valid 10-digit mobile number for ARN status alerts.');
+      return;
+    }
     if (!consentChecked) {
-      alert('Please accept the declaration checkbox before submission.');
+      setValidationError('Please accept the declaration checkbox before submission.');
       return;
     }
 
     onSubmit({
       schemeId: scheme.id,
-      applicantName,
-      samagraMemberId,
-      samagraFamilyId,
-      phone,
-      wardOrBlock,
+      applicantName: applicantName.trim(),
+      samagraMemberId: samagraMemberId.trim(),
+      samagraFamilyId: samagraFamilyId.trim(),
+      phone: phone.trim(),
+      wardOrBlock: wardOrBlock.trim(),
       areaType: profile.areaType,
     });
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
       <div className="bg-white rounded-3xl max-w-xl w-full p-6 sm:p-8 shadow-2xl border border-slate-200 relative max-h-[90vh] overflow-y-auto">
         <button
+          type="button"
           onClick={onClose}
-          className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 p-1.5 rounded-xl hover:bg-slate-100 transition"
+          className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 p-1.5 rounded-xl hover:bg-slate-100 transition cursor-pointer"
         >
           <X className="w-5 h-5" />
         </button>
@@ -109,16 +135,24 @@ export const ApplicationIntakeModal: React.FC<ApplicationIntakeModalProps> = ({
           </div>
         </div>
 
+        {validationError && (
+          <div className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+            <span>{validationError}</span>
+          </div>
+        )}
+
         {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1">
-              Applicant Full Name (आवेदक का नाम):
+              Applicant Full Name (आवेदक का नाम): *
             </label>
             <input
               type="text"
               value={applicantName}
               onChange={e => setApplicantName(e.target.value)}
+              placeholder="Enter applicant full name as per Samagra"
               required
               className="w-full text-xs font-medium rounded-xl border border-slate-300 p-2.5 text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-amber-500"
             />
@@ -127,12 +161,13 @@ export const ApplicationIntakeModal: React.FC<ApplicationIntakeModalProps> = ({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Mobile Number (मोबाइल):
+                Mobile Number (मोबाइल): *
               </label>
               <input
-                type="text"
+                type="tel"
                 value={phone}
                 onChange={e => setPhone(e.target.value)}
+                placeholder="10-digit mobile number"
                 required
                 className="w-full text-xs font-mono rounded-xl border border-slate-300 p-2.5 text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-amber-500"
               />
@@ -140,7 +175,7 @@ export const ApplicationIntakeModal: React.FC<ApplicationIntakeModalProps> = ({
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Indore Ward / Janpad:
+                Indore Ward / Janpad: *
               </label>
               <input
                 type="text"
@@ -155,12 +190,13 @@ export const ApplicationIntakeModal: React.FC<ApplicationIntakeModalProps> = ({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Samagra Family ID (8-Digit):
+                Samagra Family ID (8-Digit): *
               </label>
               <input
                 type="text"
                 value={samagraFamilyId}
                 onChange={e => setSamagraFamilyId(e.target.value)}
+                placeholder="8-digit Samagra Family ID"
                 required
                 className="w-full text-xs font-mono rounded-xl border border-slate-300 p-2.5 text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-amber-500"
               />
@@ -168,12 +204,13 @@ export const ApplicationIntakeModal: React.FC<ApplicationIntakeModalProps> = ({
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Samagra Member ID (9-Digit):
+                Samagra Member ID (9-Digit): *
               </label>
               <input
                 type="text"
                 value={samagraMemberId}
                 onChange={e => setSamagraMemberId(e.target.value)}
+                placeholder="9-digit Samagra Member ID"
                 required
                 className="w-full text-xs font-mono rounded-xl border border-slate-300 p-2.5 text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-amber-500"
               />
@@ -200,13 +237,13 @@ export const ApplicationIntakeModal: React.FC<ApplicationIntakeModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2.5 text-xs font-bold text-slate-600 hover:text-slate-800"
+              className="px-4 py-2.5 text-xs font-bold text-slate-600 hover:text-slate-800 cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-6 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-xl shadow-xs transition flex items-center space-x-1.5"
+              className="px-6 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-xl shadow-xs transition flex items-center space-x-1.5 cursor-pointer"
             >
               <span>Submit Application & Generate ARN</span>
               <ArrowRight className="w-3.5 h-3.5" />

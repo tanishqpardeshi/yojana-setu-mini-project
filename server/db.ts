@@ -2,19 +2,24 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { 
-  Scheme, 
-  ApplicationRecord, 
-  LiveNotification, 
-  SamagraFamily, 
-  DistrictStats 
+import {
+  Scheme,
+  ApplicationRecord,
+  LiveNotification,
+  SamagraFamily,
+  DistrictStats,
+  DigiLockerDocumentRecord,
+  PortalReachabilityStatus,
+  SchemesRealtimeReport,
 } from '../src/types/index.js';
 import { SCHEMES_DATABASE } from '../src/data/schemesData.js';
-import { 
-  INITIAL_APPLICATION_RECORDS, 
-  INITIAL_NOTIFICATIONS, 
-  MOCK_SAMAGRA_FAMILIES 
-} from '../src/data/samagraMockProfiles.js';
+import { IMC_WARDS, JANPAD_BLOCKS } from '../src/data/indoreGovernance.js';
+import {
+  aggregateJanpadLiveMetrics,
+  aggregateWardLiveMetrics,
+  evaluateSchemesRealtimeStatus,
+  resolveSchemePortalUrl,
+} from '../src/utils/liveDataEngine.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -58,6 +63,11 @@ db.exec(`
     apply_url TEXT,
     csc_available INTEGER NOT NULL DEFAULT 1,
     active_budget_cr REAL,
+    data_origin TEXT NOT NULL DEFAULT 'baseline_catalog',
+    portal_status TEXT NOT NULL DEFAULT 'unchecked',
+    portal_http_status INTEGER,
+    portal_checked_at TEXT,
+    portal_latency_ms INTEGER,
     updated_at TEXT NOT NULL
   );
 
@@ -94,6 +104,17 @@ db.exec(`
     created_at TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS digilocker_documents (
+    citizen_key TEXT NOT NULL,
+    doc_id TEXT NOT NULL,
+    doc_number TEXT NOT NULL,
+    source TEXT NOT NULL,
+    issuer TEXT NOT NULL,
+    verified INTEGER NOT NULL DEFAULT 1,
+    verified_at TEXT NOT NULL,
+    PRIMARY KEY (citizen_key, doc_id)
+  );
+
   CREATE TABLE IF NOT EXISTS admin_broadcasts (
     id TEXT PRIMARY KEY,
     timestamp TEXT NOT NULL,
@@ -107,6 +128,28 @@ db.exec(`
   );
 `);
 
+// Safe schema migration for existing SQLite databases created prior to real-time columns
+function ensureSchemesRealtimeColumns() {
+  const existingCols = new Set(
+    (db.prepare('PRAGMA table_info(schemes)').all() as Array<{ name: string }>).map(c => c.name)
+  );
+  const migrations: Array<[string, string]> = [
+    ['data_origin', "ALTER TABLE schemes ADD COLUMN data_origin TEXT NOT NULL DEFAULT 'baseline_catalog'"],
+    ['portal_status', "ALTER TABLE schemes ADD COLUMN portal_status TEXT NOT NULL DEFAULT 'unchecked'"],
+    ['portal_http_status', 'ALTER TABLE schemes ADD COLUMN portal_http_status INTEGER'],
+    ['portal_checked_at', 'ALTER TABLE schemes ADD COLUMN portal_checked_at TEXT'],
+    ['portal_latency_ms', 'ALTER TABLE schemes ADD COLUMN portal_latency_ms INTEGER'],
+  ];
+
+  for (const [col, sql] of migrations) {
+    if (!existingCols.has(col)) {
+      db.exec(sql);
+    }
+  }
+}
+
+ensureSchemesRealtimeColumns();
+
 function safeJsonParse<T>(raw: string | null | undefined, fallback: T): T {
   if (!raw) return fallback;
   try {
@@ -118,7 +161,7 @@ function safeJsonParse<T>(raw: string | null | undefined, fallback: T): T {
 
 // Helper to convert DB row to Scheme model
 function rowToScheme(row: any): Scheme {
-  return {
+  const baseScheme: Scheme = {
     id: row.id,
     code: row.code,
     title: row.title,
@@ -145,7 +188,15 @@ function rowToScheme(row: any): Scheme {
     applyUrl: row.apply_url || undefined,
     cscAvailable: Boolean(row.csc_available),
     activeBudgetCr: row.active_budget_cr ? Number(row.active_budget_cr) : undefined,
+    updatedAt: row.updated_at || undefined,
+    dataOrigin: row.data_origin === 'admin_live' ? 'admin_live' : 'baseline_catalog',
+    portalStatus: (row.portal_status as PortalReachabilityStatus) || 'unchecked',
+    portalHttpStatus: row.portal_http_status !== null && row.portal_http_status !== undefined ? Number(row.portal_http_status) : null,
+    portalCheckedAt: row.portal_checked_at || null,
+    portalLatencyMs: row.portal_latency_ms !== null && row.portal_latency_ms !== undefined ? Number(row.portal_latency_ms) : null,
   };
+  baseScheme.applyUrl = resolveSchemePortalUrl(baseScheme);
+  return baseScheme;
 }
 
 // Helper to convert DB row to ApplicationRecord
@@ -165,177 +216,110 @@ function rowToApplication(row: any): ApplicationRecord {
     currentStatus: row.current_status,
     officerInCharge: row.officer_in_charge,
     sanctionAmount: row.sanction_amount ? Number(row.sanction_amount) : 0,
-    kioskOperatorCode: row.kiosk_operator_code || undefined,
     remarks: row.remarks || '',
     timeline: safeJsonParse(row.timeline_json, []),
   };
 }
 
-// Seed / Sync schemes data on startup
-function seedDatabase() {
-  const insertSchemeStmt = db.prepare(`
-    INSERT OR REPLACE INTO schemes (
+// Sync official scheme catalog baseline (without overwriting admin-edited schemes or portal check timestamps)
+// and purge any legacy demo citizen/application/broadcast records from pre-existing SQLite files
+function initializeLiveDatabase() {
+  const existingIds = new Set(
+    (db.prepare('SELECT id FROM schemes').all() as Array<{ id: string }>).map(r => r.id)
+  );
+
+  const insertBaselineSchemeStmt = db.prepare(`
+    INSERT INTO schemes (
       id, code, title, title_hindi, title_malwi, governance_level, department,
       nodal_office_indore, helpline, target_beneficiary, description, description_hindi,
       benefits, benefits_hindi, financial_amount, financial_frequency, financial_desc,
       eligibility_rules_json, required_documents_json, tags_json, malwi_synonyms_json,
-      apply_url, csc_available, active_budget_cr, updated_at
+      apply_url, csc_available, active_budget_cr, data_origin, portal_status, updated_at
     ) VALUES (
       @id, @code, @title, @titleHindi, @titleMalwi, @governanceLevel, @department,
       @nodalOfficeIndore, @helpline, @targetBeneficiary, @description, @descriptionHindi,
       @benefits, @benefitsHindi, @financialAmount, @financialFrequency, @financialDesc,
       @eligibilityRulesJson, @requiredDocumentsJson, @tagsJson, @malwiSynonymsJson,
-      @applyUrl, @cscAvailable, @activeBudgetCr, @updatedAt
+      @applyUrl, @cscAvailable, @activeBudgetCr, 'baseline_catalog', 'unchecked', @updatedAt
     )
   `);
 
-  const insertManySchemes = db.transaction((schemes: Scheme[]) => {
+  const backfillPortalUrlStmt = db.prepare(`
+    UPDATE schemes SET apply_url = ? WHERE id = ? AND (apply_url IS NULL OR trim(apply_url) = '')
+  `);
+
+  const nowIso = new Date().toISOString();
+  const syncBaseline = db.transaction((schemes: Scheme[]) => {
+    let inserted = 0;
     for (const s of schemes) {
-      insertSchemeStmt.run({
-        id: s.id,
-        code: s.code,
-        title: s.title,
-        titleHindi: s.titleHindi,
-        titleMalwi: s.titleMalwi,
-        governanceLevel: s.governanceLevel,
-        department: s.department,
-        nodalOfficeIndore: s.nodalOfficeIndore,
-        helpline: s.helpline,
-        targetBeneficiary: s.targetBeneficiary,
-        description: s.description,
-        descriptionHindi: s.descriptionHindi,
-        benefits: s.benefits,
-        benefitsHindi: s.benefitsHindi,
-        financialAmount: s.financialEntitlement.amount,
-        financialFrequency: s.financialEntitlement.frequency,
-        financialDesc: s.financialEntitlement.description,
-        eligibilityRulesJson: JSON.stringify(s.eligibilityRules),
-        requiredDocumentsJson: JSON.stringify(s.requiredDocuments),
-        tagsJson: JSON.stringify(s.tags),
-        malwiSynonymsJson: JSON.stringify(s.malwiSynonyms),
-        applyUrl: s.applyUrl || null,
-        cscAvailable: s.cscAvailable ? 1 : 0,
-        activeBudgetCr: s.activeBudgetCr || null,
-        updatedAt: new Date().toISOString(),
-      });
+      const portalUrl = resolveSchemePortalUrl(s);
+      if (!existingIds.has(s.id)) {
+        insertBaselineSchemeStmt.run({
+          id: s.id,
+          code: s.code,
+          title: s.title,
+          titleHindi: s.titleHindi,
+          titleMalwi: s.titleMalwi,
+          governanceLevel: s.governanceLevel,
+          department: s.department,
+          nodalOfficeIndore: s.nodalOfficeIndore,
+          helpline: s.helpline,
+          targetBeneficiary: s.targetBeneficiary,
+          description: s.description,
+          descriptionHindi: s.descriptionHindi,
+          benefits: s.benefits,
+          benefitsHindi: s.benefitsHindi,
+          financialAmount: s.financialEntitlement.amount,
+          financialFrequency: s.financialEntitlement.frequency,
+          financialDesc: s.financialEntitlement.description,
+          eligibilityRulesJson: JSON.stringify(s.eligibilityRules),
+          requiredDocumentsJson: JSON.stringify(s.requiredDocuments),
+          tagsJson: JSON.stringify(s.tags),
+          malwiSynonymsJson: JSON.stringify(s.malwiSynonyms),
+          applyUrl: portalUrl,
+          cscAvailable: s.cscAvailable ? 1 : 0,
+          activeBudgetCr: s.activeBudgetCr || null,
+          updatedAt: nowIso,
+        });
+        inserted += 1;
+      } else {
+        backfillPortalUrlStmt.run(portalUrl, s.id);
+      }
     }
+    return inserted;
   });
 
-  insertManySchemes(SCHEMES_DATABASE);
-  console.log(`[SQLite] Synced ${SCHEMES_DATABASE.length} schemes into SQLite database.`);
-
-  // Seed applications
-  const appCount = (db.prepare('SELECT count(*) as count FROM applications').get() as any).count;
-  if (appCount === 0) {
-    const insertAppStmt = db.prepare(`
-      INSERT INTO applications (
-        arn, scheme_id, scheme_title, scheme_title_hindi, applicant_name,
-        samagra_member_id, samagra_family_id, phone, ward_or_block, area_type,
-        applied_date, current_status, officer_in_charge, sanction_amount,
-        kiosk_operator_code, remarks, timeline_json, created_at
-      ) VALUES (
-        @arn, @schemeId, @schemeTitle, @schemeTitleHindi, @applicantName,
-        @samagraMemberId, @samagraFamilyId, @phone, @wardOrBlock, @areaType,
-        @appliedDate, @currentStatus, @officerInCharge, @sanctionAmount,
-        @kioskOperatorCode, @remarks, @timelineJson, @createdAt
-      )
-    `);
-
-    const insertManyApps = db.transaction((apps: ApplicationRecord[]) => {
-      for (const a of apps) {
-        insertAppStmt.run({
-          arn: a.arn,
-          schemeId: a.schemeId,
-          schemeTitle: a.schemeTitle,
-          schemeTitleHindi: a.schemeTitleHindi,
-          applicantName: a.applicantName,
-          samagraMemberId: a.samagraMemberId,
-          samagraFamilyId: a.samagraFamilyId,
-          phone: a.phone,
-          wardOrBlock: a.wardOrBlock,
-          areaType: a.areaType,
-          appliedDate: a.appliedDate,
-          currentStatus: a.currentStatus,
-          officerInCharge: a.officerInCharge,
-          sanctionAmount: a.sanctionAmount || 0,
-          kioskOperatorCode: a.kioskOperatorCode || null,
-          remarks: a.remarks || '',
-          timelineJson: JSON.stringify(a.timeline),
-          createdAt: new Date().toISOString(),
-        });
-      }
-    });
-
-    insertManyApps(INITIAL_APPLICATION_RECORDS);
-    console.log(`[SQLite] Seeded ${INITIAL_APPLICATION_RECORDS.length} initial applications.`);
+  const insertedCount = syncBaseline(SCHEMES_DATABASE);
+  if (insertedCount > 0) {
+    console.log(`[SQLite] Loaded ${insertedCount} baseline schemes into SQLite database.`);
   }
 
-  // Seed Samagra Families
-  const famCount = (db.prepare('SELECT count(*) as count FROM samagra_families').get() as any).count;
-  if (famCount === 0) {
-    const insertFamStmt = db.prepare(`
-      INSERT INTO samagra_families (
-        family_id, head_name, area_type, ward_or_block, address,
-        ration_card_type, members_json, created_at
-      ) VALUES (
-        @familyId, @headName, @areaType, @wardOrBlock, @address,
-        @rationCardType, @membersJson, @createdAt
-      )
-    `);
+  // Purge legacy demo records from pre-existing SQLite files so only real user-created data exists
+  const demoFamilyIds = ['48921840', '71203945', '39510482', '84019283'];
+  const demoArns = ['YS-IND-2026-94812', 'YS-IND-2026-88319', 'YS-IND-2026-73190'];
+  const demoNotifIds = ['notif-1', 'notif-2', 'notif-3', 'notif-4', 'notif-5'];
 
-    const insertManyFams = db.transaction((families: SamagraFamily[]) => {
-      for (const f of families) {
-        insertFamStmt.run({
-          familyId: f.familyId,
-          headName: f.headName,
-          areaType: f.areaType,
-          wardOrBlock: f.wardOrBlock,
-          address: f.address,
-          rationCardType: f.rationCardType,
-          membersJson: JSON.stringify(f.members),
-          createdAt: new Date().toISOString(),
-        });
-      }
-    });
-
-    insertManyFams(MOCK_SAMAGRA_FAMILIES);
-    console.log(`[SQLite] Seeded ${MOCK_SAMAGRA_FAMILIES.length} Samagra families.`);
-  }
-
-  // Seed Notifications
-  const notifCount = (db.prepare('SELECT count(*) as count FROM admin_broadcasts').get() as any).count;
-  if (notifCount === 0) {
-    const insertNotifStmt = db.prepare(`
-      INSERT INTO admin_broadcasts (
-        id, timestamp, type, message, message_hindi, ward_or_block, amount, arn, created_at
-      ) VALUES (
-        @id, @timestamp, @type, @message, @messageHindi, @wardOrBlock, @amount, @arn, @createdAt
-      )
-    `);
-
-    const insertManyNotifs = db.transaction((notifs: LiveNotification[]) => {
-      for (const n of notifs) {
-        insertNotifStmt.run({
-          id: n.id,
-          timestamp: n.timestamp,
-          type: n.type,
-          message: n.message,
-          messageHindi: n.messageHindi,
-          wardOrBlock: n.wardOrBlock,
-          amount: n.amount || null,
-          arn: n.arn || null,
-          createdAt: new Date().toISOString(),
-        });
-      }
-    });
-
-    insertManyNotifs(INITIAL_NOTIFICATIONS);
-    console.log(`[SQLite] Seeded ${INITIAL_NOTIFICATIONS.length} initial administrative broadcasts.`);
-  }
+  const purgeDemo = db.transaction(() => {
+    db.prepare(`DELETE FROM samagra_families WHERE family_id IN (${demoFamilyIds.map(() => '?').join(',')})`).run(...demoFamilyIds);
+    db.prepare(`DELETE FROM applications WHERE arn IN (${demoArns.map(() => '?').join(',')})`).run(...demoArns);
+    db.prepare(`DELETE FROM admin_broadcasts WHERE id IN (${demoNotifIds.map(() => '?').join(',')})`).run(...demoNotifIds);
+    // Remove legacy interval-generated mock broadcasts
+    db.prepare(`
+      DELETE FROM admin_broadcasts
+      WHERE message LIKE 'DBT Batch credited: 120 beneficiaries%'
+         OR message LIKE 'Citizen Portal Vijay Nagar: 8 new digital applications%'
+         OR message LIKE 'Sanwer Block: Onion-Garlic storage shed subsidy approved for 5 farmer%'
+         OR message LIKE 'IMC Town Vending Committee completed biometric survey for 14 street food%'
+         OR message LIKE 'MP Kisan Kalyan ₹3,000 top-up installment released to 340%'
+         OR message LIKE 'Tribal Bamboo Craft grant application registered under Ahilya Kosh.%'
+         OR message LIKE '%MPOnline Kiosk%'
+         OR message LIKE '%CSC Kiosk%'
+    `).run();
+  });
+  purgeDemo();
 }
 
-// Run initial seed
-seedDatabase();
+initializeLiveDatabase();
 
 // ================= CRUD API OPERATIONS =================
 
@@ -375,20 +359,26 @@ export const dbService = {
     return rowToScheme(row);
   },
 
-  insertScheme(scheme: Scheme): boolean {
+  insertScheme(scheme: Scheme, origin: 'baseline_catalog' | 'admin_live' = 'admin_live'): Scheme {
+    const existing = this.getSchemeById(scheme.id);
+    const portalUrl = resolveSchemePortalUrl(scheme);
+    const nowIso = new Date().toISOString();
+
     const stmt = db.prepare(`
       INSERT OR REPLACE INTO schemes (
         id, code, title, title_hindi, title_malwi, governance_level, department,
         nodal_office_indore, helpline, target_beneficiary, description, description_hindi,
         benefits, benefits_hindi, financial_amount, financial_frequency, financial_desc,
         eligibility_rules_json, required_documents_json, tags_json, malwi_synonyms_json,
-        apply_url, csc_available, active_budget_cr, updated_at
+        apply_url, csc_available, active_budget_cr, data_origin,
+        portal_status, portal_http_status, portal_checked_at, portal_latency_ms, updated_at
       ) VALUES (
         @id, @code, @title, @titleHindi, @titleMalwi, @governanceLevel, @department,
         @nodalOfficeIndore, @helpline, @targetBeneficiary, @description, @descriptionHindi,
         @benefits, @benefitsHindi, @financialAmount, @financialFrequency, @financialDesc,
         @eligibilityRulesJson, @requiredDocumentsJson, @tagsJson, @malwiSynonymsJson,
-        @applyUrl, @cscAvailable, @activeBudgetCr, @updatedAt
+        @applyUrl, @cscAvailable, @activeBudgetCr, @dataOrigin,
+        @portalStatus, @portalHttpStatus, @portalCheckedAt, @portalLatencyMs, @updatedAt
       )
     `);
 
@@ -414,12 +404,45 @@ export const dbService = {
       requiredDocumentsJson: JSON.stringify(scheme.requiredDocuments || []),
       tagsJson: JSON.stringify(scheme.tags || []),
       malwiSynonymsJson: JSON.stringify(scheme.malwiSynonyms || []),
-      applyUrl: scheme.applyUrl || null,
+      applyUrl: portalUrl,
       cscAvailable: scheme.cscAvailable === false ? 0 : 1,
       activeBudgetCr: scheme.activeBudgetCr || null,
-      updatedAt: new Date().toISOString(),
+      dataOrigin: origin,
+      portalStatus: existing?.portalStatus || 'unchecked',
+      portalHttpStatus: existing?.portalHttpStatus ?? null,
+      portalCheckedAt: existing?.portalCheckedAt ?? null,
+      portalLatencyMs: existing?.portalLatencyMs ?? null,
+      updatedAt: nowIso,
     });
-    return true;
+    return this.getSchemeById(scheme.id)!;
+  },
+
+  updateSchemesPortalCheckByUrl(
+    urlResults: Map<string, { status: PortalReachabilityStatus; httpStatus: number | null; latencyMs: number | null; checkedAt: string }>
+  ): SchemesRealtimeReport {
+    const schemes = this.getSchemes();
+    const updateStmt = db.prepare(`
+      UPDATE schemes
+      SET portal_status = ?, portal_http_status = ?, portal_checked_at = ?, portal_latency_ms = ?
+      WHERE id = ?
+    `);
+
+    const tx = db.transaction(() => {
+      for (const s of schemes) {
+        const url = resolveSchemePortalUrl(s);
+        const res = urlResults.get(url);
+        if (res) {
+          updateStmt.run(res.status, res.httpStatus, res.checkedAt, res.latencyMs, s.id);
+        }
+      }
+    });
+    tx();
+
+    return evaluateSchemesRealtimeStatus(this.getSchemes());
+  },
+
+  getSchemesRealtimeStatus(): SchemesRealtimeReport {
+    return evaluateSchemesRealtimeStatus(this.getSchemes());
   },
 
   deleteScheme(id: string): boolean {
@@ -488,7 +511,7 @@ export const dbService = {
       currentStatus: app.currentStatus,
       officerInCharge: app.officerInCharge,
       sanctionAmount: app.sanctionAmount || 0,
-      kioskOperatorCode: app.kioskOperatorCode || null,
+      kioskOperatorCode: null,
       remarks: app.remarks || '',
       timelineJson: JSON.stringify(app.timeline),
       createdAt: new Date().toISOString(),
@@ -496,19 +519,71 @@ export const dbService = {
     return true;
   },
 
-  updateApplicationStatus(arn: string, status: string, remarks?: string): ApplicationRecord | null {
+  updateApplicationStatus(arn: string, status: ApplicationRecord['currentStatus'], remarks?: string): ApplicationRecord | null {
     const existing = this.getApplicationByArn(arn);
     if (!existing) return null;
 
-    const timeline = [...existing.timeline];
-    timeline.push({
-      title: `Status updated to ${status.replace('_', ' ').toUpperCase()}`,
-      titleHindi: `स्थिति परिवर्तित: ${status}`,
-      date: new Date().toLocaleString(),
-      location: 'Indore Administrative Portal',
-      status: 'completed',
-      remarks: remarks || undefined,
+    const stageOrder: ApplicationRecord['currentStatus'][] = [
+      'submitted',
+      'ward_verification',
+      'collectorate_scrutiny',
+      'sanction_issued',
+      'dbt_disbursed',
+    ];
+    const targetIdx = stageOrder.indexOf(status);
+    const nowDisplay = new Date().toLocaleString('en-IN', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
     });
+
+    let timeline = existing.timeline.map((step, idx) => {
+      if (status === 'rejected') {
+        if (step.status === 'completed') return step;
+        return { ...step, status: 'pending' as const };
+      }
+      if (targetIdx >= 0) {
+        if (idx < targetIdx) {
+          return {
+            ...step,
+            status: 'completed' as const,
+            date: step.date === 'Pending' || step.date.startsWith('In Progress') ? nowDisplay : step.date,
+          };
+        }
+        if (idx === targetIdx) {
+          return {
+            ...step,
+            status: 'completed' as const,
+            date: nowDisplay,
+            remarks: remarks || step.remarks,
+          };
+        }
+        if (idx === targetIdx + 1) {
+          return {
+            ...step,
+            status: 'in_progress' as const,
+            date: 'In Progress',
+          };
+        }
+      }
+      return step;
+    });
+
+    if (status === 'rejected') {
+      timeline = [
+        ...timeline,
+        {
+          title: 'Application Returned / Rejected',
+          titleHindi: 'आवेदन अस्वीकृत / वापस किया गया',
+          date: nowDisplay,
+          location: 'Indore Collectorate Admin Portal',
+          status: 'completed',
+          remarks: remarks || 'Returned by verification officer for correction.',
+        },
+      ];
+    }
 
     const stmt = db.prepare(`
       UPDATE applications
@@ -521,13 +596,26 @@ export const dbService = {
   },
 
   // Samagra Families
+  getAllSamagraFamilies(): SamagraFamily[] {
+    const rows = db.prepare('SELECT * FROM samagra_families ORDER BY created_at DESC').all() as any[];
+    return rows.map(r => ({
+      familyId: r.family_id,
+      headName: r.head_name,
+      areaType: r.area_type,
+      wardOrBlock: r.ward_or_block,
+      address: r.address,
+      rationCardType: r.ration_card_type,
+      members: safeJsonParse<SamagraFamily['members']>(r.members_json, []),
+      createdAt: r.created_at,
+    }));
+  },
+
   getSamagraFamily(familyId: string): SamagraFamily | null {
     const cleanId = familyId.trim();
     if (!cleanId) return null;
 
-    const row = db.prepare('SELECT * FROM samagra_families WHERE family_id = ?').get(cleanId);
+    const row = db.prepare('SELECT * FROM samagra_families WHERE family_id = ?').get(cleanId) as any;
     if (!row) {
-      // Also check if member ID matches any member inside members_json
       const allRows = db.prepare('SELECT * FROM samagra_families').all() as any[];
       for (const r of allRows) {
         const members = safeJsonParse<SamagraFamily['members']>(r.members_json, []);
@@ -540,21 +628,22 @@ export const dbService = {
             address: r.address,
             rationCardType: r.ration_card_type,
             members,
+            createdAt: r.created_at,
           };
         }
       }
       return null;
     }
 
-    const r = row as any;
     return {
-      familyId: r.family_id,
-      headName: r.head_name,
-      areaType: r.area_type,
-      wardOrBlock: r.ward_or_block,
-      address: r.address,
-      rationCardType: r.ration_card_type,
-      members: safeJsonParse<SamagraFamily['members']>(r.members_json, []),
+      familyId: row.family_id,
+      headName: row.head_name,
+      areaType: row.area_type,
+      wardOrBlock: row.ward_or_block,
+      address: row.address,
+      rationCardType: row.ration_card_type,
+      members: safeJsonParse<SamagraFamily['members']>(row.members_json, []),
+      createdAt: row.created_at,
     };
   },
 
@@ -574,7 +663,10 @@ export const dbService = {
         memberId: String(m.memberId).trim(),
         name: String(m.name).trim(),
         nameHindi: String(m.nameHindi || m.name).trim(),
+        relation: String(m.relation || 'Member').trim(),
+        relationHindi: String(m.relationHindi || m.relation || 'सदस्य').trim(),
       })),
+      createdAt: new Date().toISOString(),
     };
 
     const stmt = db.prepare(`
@@ -595,10 +687,91 @@ export const dbService = {
       address: cleanFamily.address,
       rationCardType: cleanFamily.rationCardType,
       membersJson: JSON.stringify(cleanFamily.members),
-      createdAt: new Date().toISOString(),
+      createdAt: cleanFamily.createdAt,
     });
 
     return cleanFamily;
+  },
+
+  updateSamagraMemberStatus(
+    familyId: string,
+    memberId: string,
+    updates: { ekycStatus?: boolean; dbtActive?: boolean }
+  ): SamagraFamily | null {
+    const family = this.getSamagraFamily(familyId);
+    if (!family) return null;
+
+    let found = false;
+    const nextMembers = family.members.map(m => {
+      if (String(m.memberId).trim() === memberId.trim()) {
+        found = true;
+        return {
+          ...m,
+          ekycStatus: updates.ekycStatus !== undefined ? Boolean(updates.ekycStatus) : m.ekycStatus,
+          dbtActive: updates.dbtActive !== undefined ? Boolean(updates.dbtActive) : m.dbtActive,
+        };
+      }
+      return m;
+    });
+
+    if (!found) return null;
+
+    db.prepare('UPDATE samagra_families SET members_json = ? WHERE family_id = ?').run(
+      JSON.stringify(nextMembers),
+      family.familyId
+    );
+
+    return this.getSamagraFamily(family.familyId);
+  },
+
+  // DigiLocker Wallet Persistence
+  getDigiLockerDocuments(citizenKey: string): DigiLockerDocumentRecord[] {
+    const cleanKey = citizenKey.trim();
+    if (!cleanKey) return [];
+    const rows = db
+      .prepare('SELECT * FROM digilocker_documents WHERE citizen_key = ? ORDER BY verified_at DESC')
+      .all(cleanKey) as any[];
+    return rows.map(r => ({
+      citizenKey: r.citizen_key,
+      docId: r.doc_id,
+      docNumber: r.doc_number,
+      source: r.source,
+      issuer: r.issuer,
+      verified: Boolean(r.verified),
+      verifiedAt: r.verified_at,
+    }));
+  },
+
+  upsertDigiLockerDocument(doc: DigiLockerDocumentRecord): DigiLockerDocumentRecord {
+    const clean: DigiLockerDocumentRecord = {
+      citizenKey: doc.citizenKey.trim(),
+      docId: doc.docId.trim(),
+      docNumber: doc.docNumber.trim(),
+      source: doc.source === 'mp_edistrict' || doc.source === 'manual' ? doc.source : 'digilocker',
+      issuer: doc.issuer.trim() || 'DigiLocker India',
+      verified: Boolean(doc.verified),
+      verifiedAt: doc.verifiedAt || new Date().toISOString(),
+    };
+
+    db.prepare(`
+      INSERT OR REPLACE INTO digilocker_documents (
+        citizen_key, doc_id, doc_number, source, issuer, verified, verified_at
+      ) VALUES (
+        @citizenKey, @docId, @docNumber, @source, @issuer, @verified, @verifiedAt
+      )
+    `).run({
+      ...clean,
+      verified: clean.verified ? 1 : 0,
+    });
+
+    return clean;
+  },
+
+  deleteDigiLockerDocument(citizenKey: string, docId: string): boolean {
+    const info = db
+      .prepare('DELETE FROM digilocker_documents WHERE citizen_key = ? AND doc_id = ?')
+      .run(citizenKey.trim(), docId.trim());
+    return info.changes > 0;
   },
 
   // Notifications
@@ -640,22 +813,57 @@ export const dbService = {
     return true;
   },
 
-  // District Macro Statistics
+  // District Macro Statistics (100% real SQLite aggregates — zero fabricated offsets)
   getDistrictStats(): DistrictStats {
     const schemeCount = (db.prepare('SELECT count(*) as count FROM schemes').get() as any).count;
     const appCount = (db.prepare('SELECT count(*) as count FROM applications').get() as any).count;
-    const dbtSum = (db.prepare("SELECT coalesce(sum(sanction_amount), 0) as total FROM applications WHERE current_status IN ('sanction_issued', 'dbt_disbursed')").get() as any).total;
-    const approvedCount = (db.prepare("SELECT count(*) as count FROM applications WHERE current_status IN ('sanction_issued', 'dbt_disbursed')").get() as any).count;
+    const pendingCount = (
+      db
+        .prepare("SELECT count(*) as count FROM applications WHERE current_status IN ('submitted', 'ward_verification', 'collectorate_scrutiny')")
+        .get() as any
+    ).count;
+    const approvedCount = (
+      db
+        .prepare("SELECT count(*) as count FROM applications WHERE current_status IN ('sanction_issued', 'dbt_disbursed')")
+        .get() as any
+    ).count;
+    const disbursedCount = (
+      db.prepare("SELECT count(*) as count FROM applications WHERE current_status = 'dbt_disbursed'").get() as any
+    ).count;
+    const dbtSumInr = (
+      db
+        .prepare("SELECT coalesce(sum(sanction_amount), 0) as total FROM applications WHERE current_status IN ('sanction_issued', 'dbt_disbursed')")
+        .get() as any
+    ).total;
+    const families = this.getAllSamagraFamilies();
+    const registeredMembers = families.reduce((sum, f) => sum + f.members.length, 0);
+    const verifiedDocsCount = (
+      db.prepare('SELECT count(*) as count FROM digilocker_documents WHERE verified = 1').get() as any
+    ).count;
 
     return {
       totalSchemes: schemeCount,
       totalApplications: appCount,
-      totalDbtDisbursedCr: Number(((dbtSum / 10000000) + 48.6).toFixed(1)), // base seed + dynamic
-      activeWards: 85,
-      activeJanpadBlocks: 4,
-      avgTurnaroundDays: 4.2,
-      approvalRatePercent: appCount > 0 ? Math.round((approvedCount / appCount) * 100) : 94,
-      grievanceRedressalPercent: 98.4,
+      pendingApplications: pendingCount,
+      approvedApplications: approvedCount,
+      disbursedApplications: disbursedCount,
+      totalDbtDisbursedInr: Number(dbtSumInr) || 0,
+      totalDbtDisbursedCr: Number(((Number(dbtSumInr) || 0) / 10000000).toFixed(4)),
+      registeredFamilies: families.length,
+      registeredMembers,
+      verifiedDocumentsCount: verifiedDocsCount,
+      activeWards: IMC_WARDS.length,
+      activeJanpadBlocks: JANPAD_BLOCKS.length,
+      approvalRatePercent: appCount > 0 ? Math.round((approvedCount / appCount) * 100) : 0,
+    };
+  },
+
+  getWardAndBlockLiveStats() {
+    const apps = this.getApplications();
+    const families = this.getAllSamagraFamilies();
+    return {
+      wards: aggregateWardLiveMetrics(apps, families, IMC_WARDS),
+      blocks: aggregateJanpadLiveMetrics(apps, families, JANPAD_BLOCKS),
     };
   },
 };

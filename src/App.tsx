@@ -1,21 +1,24 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Building2, ShieldCheck } from 'lucide-react';
-import { 
-  SupportedLanguage, 
-  UserMode, 
-  CitizenProfile, 
-  Scheme, 
-  ApplicationRecord, 
-  LiveNotification, 
-  FamilyMember, 
+import {
+  SupportedLanguage,
+  UserMode,
+  CitizenProfile,
+  Scheme,
+  ApplicationRecord,
+  LiveNotification,
+  FamilyMember,
   SamagraFamily,
   GovernanceLevel,
   JanpadBlock,
+  DistrictStats,
+  DigiLockerDocumentRecord,
+  SchemesRealtimeReport,
+  VerifiedDocumentMeta,
 } from './types';
-import { SCHEMES_DATABASE } from './data/schemesData';
-import { INITIAL_APPLICATION_RECORDS, INITIAL_NOTIFICATIONS } from './data/samagraMockProfiles';
 import { searchSchemes } from './utils/searchEngine';
 import { rankSchemesForCitizen } from './utils/rulesEngine';
+import { createEmptyCitizenProfile, evaluateSchemesRealtimeStatus } from './utils/liveDataEngine';
 import { Header } from './components/Header';
 import { HeroSection } from './components/HeroSection';
 import { EligibilityCalculator } from './components/EligibilityCalculator';
@@ -23,8 +26,6 @@ import { GovernanceLevelsView } from './components/GovernanceLevelsView';
 import { SamagraFamilyView } from './components/SamagraFamilyView';
 import { DigiLockerTrackerView } from './components/DigiLockerTrackerView';
 import { ApplicationTrackerView } from './components/ApplicationTrackerView';
-import { YojanaMitraChatbot } from './components/YojanaMitraChatbot';
-import { CscOperatorMode } from './components/CscOperatorMode';
 import { AdminDashboard } from './components/AdminDashboard';
 import { ApplicationIntakeModal } from './components/ApplicationIntakeModal';
 import { CitizenEntitlementCardModal } from './components/CitizenEntitlementCardModal';
@@ -49,6 +50,24 @@ import {
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { collection, onSnapshot } from 'firebase/firestore';
 
+const ACTIVE_SAMAGRA_STORAGE_KEY = 'yojanasetu_live_samagra_session';
+
+function mapDigiLockerRecordsToProfileMap(
+  docs: DigiLockerDocumentRecord[]
+): Record<string, VerifiedDocumentMeta> {
+  const map: Record<string, VerifiedDocumentMeta> = {};
+  for (const d of docs) {
+    map[d.docId] = {
+      verified: Boolean(d.verified),
+      source: d.source,
+      docNumber: d.docNumber,
+      issuer: d.issuer,
+      verifiedAt: d.verifiedAt,
+    };
+  }
+  return map;
+}
+
 export default function App() {
   const [currentLanguage, setCurrentLanguage] = useState<SupportedLanguage>('en');
   const [userMode, setUserMode] = useState<UserMode>('citizen');
@@ -64,73 +83,218 @@ export default function App() {
   const [savedSchemes, setSavedSchemes] = useState<Array<{ schemeId: string; schemeTitle: string; savedAt: string }>>([]);
   const [isSavedSchemesOpen, setIsSavedSchemesOpen] = useState(false);
 
-  // Default active profile (Sunita Sharma, Vijay Nagar Ward 72, Urban IMC)
-  const [citizenProfile, setCitizenProfile] = useState<CitizenProfile>({
-    fullName: 'Sunita Sharma',
-    age: 43,
-    gender: 'female',
-    category: 'GEN',
-    areaType: 'urban',
-    wardNumber: 72,
-    annualIncome: 120000,
-    occupation: 'Homemaker',
-    landHoldingHectares: 0,
-    isBPL: false,
-    hasDisability: false,
-    maritalStatus: 'Married',
-    isMpDomicile: true,
-    isIndoreResident: true,
-    samagraFamilyId: '48921840',
-    samagraMemberId: '109283742',
-    verifiedDocuments: {
-      samagra_family: { verified: true, source: 'mp_edistrict', docNumber: 'SPR-48921840' },
-      samagra_member: { verified: true, source: 'mp_edistrict', docNumber: 'SPR-109283742' },
-      aadhaar: { verified: true, source: 'digilocker', docNumber: 'DL-UID-881923' },
-      bank_dbt: { verified: true, source: 'digilocker', docNumber: 'NPCI-BOI-8192' },
-      mp_domicile: { verified: true, source: 'digilocker', docNumber: 'MP-DOM-2024-912' },
-    },
-  });
+  // Clean unlinked initial citizen profile (zero demo defaults)
+  const [citizenProfile, setCitizenProfile] = useState<CitizenProfile>(() => createEmptyCitizenProfile());
 
-  const [schemes, setSchemes] = useState<Scheme[]>(SCHEMES_DATABASE);
-  const [applications, setApplications] = useState<ApplicationRecord[]>(INITIAL_APPLICATION_RECORDS);
-  const [notifications, setNotifications] = useState<LiveNotification[]>(INITIAL_NOTIFICATIONS);
+  // 100% live backend-driven state
+  const [schemes, setSchemes] = useState<Scheme[]>([]);
+  const [schemesRealtimeReport, setSchemesRealtimeReport] = useState<SchemesRealtimeReport | null>(null);
+  const [isCheckingRealtime, setIsCheckingRealtime] = useState(false);
+  const [applications, setApplications] = useState<ApplicationRecord[]>([]);
+  const [notifications, setNotifications] = useState<LiveNotification[]>([]);
+  const [samagraFamilies, setSamagraFamilies] = useState<SamagraFamily[]>([]);
+  const [districtStats, setDistrictStats] = useState<DistrictStats | null>(null);
   const [intakeScheme, setIntakeScheme] = useState<Scheme | null>(null);
-  const [isSamagraModalOpen, setIsSamagraModalOpen] = useState(false);
 
-  // Load initial data from backend SQLite APIs
-  useEffect(() => {
-    fetch('/api/schemes')
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        if (data?.schemes && Array.isArray(data.schemes) && data.schemes.length > 0) {
+  const activeCitizenKey = citizenProfile.samagraMemberId || firebaseUser?.uid || null;
+
+  const fetchLiveSchemes = useCallback(async () => {
+    try {
+      const [schemesRes, statusRes] = await Promise.all([
+        fetch('/api/schemes'),
+        fetch('/api/schemes/realtime-status'),
+      ]);
+      if (schemesRes.ok) {
+        const data = await schemesRes.json();
+        if (Array.isArray(data?.schemes)) {
           setSchemes(data.schemes);
+          if (!statusRes.ok) {
+            setSchemesRealtimeReport(evaluateSchemesRealtimeStatus(data.schemes));
+          }
         }
-      })
-      .catch(err => console.warn('Schemes fetch fallback to local data:', err));
-
-    fetch('/api/applications')
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        if (data?.records && Array.isArray(data.records) && data.records.length > 0) {
-          setApplications(data.records);
+      }
+      if (statusRes.ok) {
+        const statusData = await statusRes.json();
+        if (statusData?.report) {
+          setSchemesRealtimeReport(statusData.report);
         }
-      })
-      .catch(err => console.warn('Applications fetch fallback to local data:', err));
+      }
+    } catch (err) {
+      console.warn('Could not load live schemes:', err);
+    }
   }, []);
 
-  // Subscribe to live SSE events from server
+  const fetchLiveApplicationsAndStats = useCallback(async () => {
+    try {
+      const [appsRes, statsRes, famRes] = await Promise.all([
+        fetch('/api/applications'),
+        fetch('/api/stats'),
+        fetch('/api/samagra'),
+      ]);
+      if (appsRes.ok) {
+        const appsData = await appsRes.json();
+        if (Array.isArray(appsData?.records)) {
+          setApplications(appsData.records);
+        }
+      }
+      if (statsRes.ok) {
+        const statsData = await statsRes.json();
+        if (statsData?.stats) {
+          setDistrictStats(statsData.stats);
+        }
+      }
+      if (famRes.ok) {
+        const famData = await famRes.json();
+        if (Array.isArray(famData?.families)) {
+          setSamagraFamilies(famData.families);
+        }
+      }
+    } catch (err) {
+      console.warn('Could not load live district data:', err);
+    }
+  }, []);
+
+  const fetchLiveNotifications = useCallback(async () => {
+    try {
+      const res = await fetch('/api/notifications?limit=50');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data?.notifications)) {
+          setNotifications(data.notifications);
+        }
+      }
+    } catch (err) {
+      console.warn('Could not load live notifications:', err);
+    }
+  }, []);
+
+  const syncCitizenDigiLockerWallet = useCallback(async (citizenKey: string) => {
+    try {
+      const res = await fetch(`/api/digilocker/${encodeURIComponent(citizenKey)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data?.documents)) {
+          const verifiedMap = mapDigiLockerRecordsToProfileMap(data.documents);
+          setCitizenProfile(prev => ({
+            ...prev,
+            verifiedDocuments: verifiedMap,
+          }));
+        }
+      }
+    } catch (err) {
+      console.warn('Could not sync DigiLocker wallet:', err);
+    }
+  }, []);
+
+  // Build CitizenProfile from a live Samagra Family member selection
+  const buildProfileFromSamagraMember = useCallback(
+    (member: FamilyMember, family: SamagraFamily): CitizenProfile => {
+      const wardMatch = family.wardOrBlock?.match(/ward\s*(\d+)/i);
+      const parsedWard = wardMatch ? Math.min(85, Math.max(1, Number(wardMatch[1]))) : 1;
+      const blockLower = (family.wardOrBlock || '').toLowerCase();
+      const parsedBlock: JanpadBlock = blockLower.includes('depalpur')
+        ? 'Depalpur'
+        : blockLower.includes('mhow')
+        ? 'Mhow'
+        : blockLower.includes('sanwer')
+        ? 'Sanwer'
+        : 'Indore';
+
+      return {
+        fullName: member.name,
+        age: member.age,
+        gender: member.gender,
+        category: member.category || 'GEN',
+        areaType: family.areaType,
+        wardNumber: family.areaType === 'urban' ? parsedWard : undefined,
+        blockName: family.areaType === 'rural' ? parsedBlock : undefined,
+        annualIncome: member.annualIncome ?? (family.rationCardType === 'BPL' ? 120000 : 250000),
+        occupation: member.occupation,
+        landHoldingHectares: member.landHoldingHectares ?? (member.occupation === 'Farmer' ? 1.5 : 0),
+        isBPL: family.rationCardType === 'BPL' || family.rationCardType === 'Antyodaya',
+        hasDisability: Boolean(member.hasDisability),
+        disabilityPercent: member.hasDisability ? 45 : 0,
+        maritalStatus: member.maritalStatus || 'Married',
+        isMpDomicile: true,
+        isIndoreResident: true,
+        samagraFamilyId: family.familyId,
+        samagraMemberId: member.memberId,
+        verifiedDocuments: {},
+      };
+    },
+    []
+  );
+
+  // Initial live hydration from SQLite APIs + restore active Samagra session if present
+  useEffect(() => {
+    fetchLiveSchemes();
+    fetchLiveApplicationsAndStats();
+    fetchLiveNotifications();
+
+    try {
+      const savedRaw = localStorage.getItem(ACTIVE_SAMAGRA_STORAGE_KEY);
+      if (savedRaw) {
+        const parsed = JSON.parse(savedRaw) as { familyId?: string; memberId?: string };
+        if (parsed.familyId && parsed.memberId) {
+          fetch(`/api/samagra/${encodeURIComponent(parsed.familyId)}`)
+            .then(r => (r.ok ? r.json() : null))
+            .then(data => {
+              const fam: SamagraFamily | undefined = data?.family;
+              const mem = fam?.members.find(m => m.memberId === parsed.memberId);
+              if (fam && mem) {
+                setCitizenProfile(buildProfileFromSamagraMember(mem, fam));
+                syncCitizenDigiLockerWallet(mem.memberId);
+              } else {
+                localStorage.removeItem(ACTIVE_SAMAGRA_STORAGE_KEY);
+              }
+            })
+            .catch(() => {});
+        }
+      }
+    } catch {
+      // ignore storage errors
+    }
+  }, [
+    fetchLiveSchemes,
+    fetchLiveApplicationsAndStats,
+    fetchLiveNotifications,
+    buildProfileFromSamagraMember,
+    syncCitizenDigiLockerWallet,
+  ]);
+
+  // Sync DigiLocker whenever activeCitizenKey changes
+  useEffect(() => {
+    if (activeCitizenKey) {
+      syncCitizenDigiLockerWallet(activeCitizenKey);
+    }
+  }, [activeCitizenKey, syncCitizenDigiLockerWallet]);
+
+  // Subscribe to genuine live SSE events from server
   useEffect(() => {
     let eventSource: EventSource | null = null;
     try {
       eventSource = new EventSource('/api/stream/events');
-      eventSource.onmessage = (event) => {
+      eventSource.onmessage = event => {
         try {
           const data = JSON.parse(event.data);
-          if (data && data.type !== 'connected' && data.id) {
-            setNotifications(prev => [data, ...prev.slice(0, 49)]);
+          if (!data || data.type === 'connected') return;
+
+          if (data.id && data.message) {
+            setNotifications(prev => {
+              if (prev.some(n => n.id === data.id)) return prev;
+              return [data, ...prev.slice(0, 49)];
+            });
           }
-        } catch (e) {
-          // parse error
+
+          if (data.eventType === 'application_updated' || data.eventType === 'samagra_updated') {
+            fetchLiveApplicationsAndStats();
+          } else if (data.eventType === 'digilocker_updated') {
+            fetchLiveApplicationsAndStats();
+          } else if (data.eventType === 'schemes_updated') {
+            fetchLiveSchemes();
+          }
+        } catch {
+          // ignore malformed event
         }
       };
     } catch (err) {
@@ -140,11 +304,11 @@ export default function App() {
     return () => {
       if (eventSource) eventSource.close();
     };
-  }, []);
+  }, [fetchLiveApplicationsAndStats, fetchLiveSchemes]);
 
   // Firebase Auth State Listener & Firestore UserProfile Hydration
   useEffect(() => {
-    const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
+    const unsubscribeAuth = onAuthStateChanged(auth, async user => {
       setFirebaseUser(user);
       if (user) {
         setAuthBannerMessage(null);
@@ -183,7 +347,7 @@ export default function App() {
     const savedSchemesCol = collection(db, 'users', firebaseUser.uid, 'savedSchemes');
     const unsubscribeSaved = onSnapshot(
       savedSchemesCol,
-      (snapshot) => {
+      snapshot => {
         const items = snapshot.docs.map(docSnap => ({
           schemeId: docSnap.id,
           schemeTitle: (docSnap.data().schemeTitle as string) || docSnap.id,
@@ -191,7 +355,7 @@ export default function App() {
         }));
         setSavedSchemes(items);
       },
-      (err) => {
+      err => {
         handleFirestoreError(err, OperationType.LIST, savedPath);
       }
     );
@@ -243,58 +407,101 @@ export default function App() {
     }
   };
 
-  // Filter schemes according to active search query & selected governance level
-  const filteredSchemes = searchSchemes(searchQuery, schemes, {
-    levelFilter: selectedLevel,
-  });
-
-  // Build CitizenProfile from a Samagra Family member selection
-  const applySamagraMemberToProfile = (member: FamilyMember, family: SamagraFamily): CitizenProfile => {
-    const wardMatch = family.wardOrBlock?.match(/ward\s*(\d+)/i);
-    const parsedWard = wardMatch ? Math.min(85, Math.max(1, Number(wardMatch[1]))) : 72;
-    const blockLower = (family.wardOrBlock || '').toLowerCase();
-    const parsedBlock: JanpadBlock = blockLower.includes('depalpur')
-      ? 'Depalpur'
-      : blockLower.includes('mhow')
-      ? 'Mhow'
-      : blockLower.includes('sanwer')
-      ? 'Sanwer'
-      : 'Indore';
-
-    const nextProfile: CitizenProfile = {
-      fullName: member.name,
-      age: member.age,
-      gender: member.gender,
-      category: family.familyId === '84019283' ? 'ST' : family.familyId === '71203945' ? 'OBC' : 'GEN',
-      areaType: family.areaType,
-      wardNumber: family.areaType === 'urban' ? parsedWard : undefined,
-      blockName: family.areaType === 'rural' ? parsedBlock : undefined,
-      annualIncome: member.annualIncome ?? (family.rationCardType === 'BPL' ? 120000 : 250000),
-      occupation: member.occupation,
-      landHoldingHectares: member.occupation === 'Farmer' ? 1.8 : 0,
-      isBPL: family.rationCardType === 'BPL' || family.rationCardType === 'Antyodaya',
-      hasDisability: false,
-      maritalStatus: member.maritalStatus || 'Married',
-      isMpDomicile: true,
-      isIndoreResident: true,
-      samagraFamilyId: family.familyId,
-      samagraMemberId: member.memberId,
-      verifiedDocuments: {
-        samagra_family: { verified: true, source: 'mp_edistrict', docNumber: `SPR-${family.familyId}` },
-        samagra_member: { verified: member.ekycStatus, source: 'mp_edistrict', docNumber: `SPR-${member.memberId}` },
-        aadhaar: { verified: member.ekycStatus, source: 'digilocker', docNumber: 'DL-UIDAI-MP' },
-        bank_dbt: { verified: member.dbtActive, source: 'digilocker', docNumber: 'NPCI-DBT-ACT' },
-        mp_domicile: { verified: true, source: 'digilocker', docNumber: 'MP-DOM-RSK' },
-        khasra_b1: { verified: member.occupation === 'Farmer', source: 'mp_edistrict', docNumber: 'B1-142/1' },
-      },
-    };
-    setCitizenProfile(nextProfile);
-    return nextProfile;
+  // Run live server-side verification against official scheme portals
+  const handleRunSchemesRealtimeCheck = async () => {
+    setIsCheckingRealtime(true);
+    try {
+      const res = await fetch('/api/schemes/verify-realtime', { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data?.schemes)) {
+          setSchemes(data.schemes);
+        }
+        if (data?.report) {
+          setSchemesRealtimeReport(data.report);
+        }
+      }
+    } catch (err) {
+      console.warn('Live schemes portal check failed:', err);
+    } finally {
+      setIsCheckingRealtime(false);
+    }
   };
 
-  // Handle member selection from Samagra Family tree
+  // Live Admin Create Scheme
+  const handleCreateLiveScheme = async (
+    schemePayload: Partial<Scheme> & { id: string; title: string }
+  ): Promise<boolean> => {
+    try {
+      const res = await fetch('/api/schemes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(schemePayload),
+      });
+      if (!res.ok) return false;
+      await fetchLiveSchemes();
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  // Live DigiLocker Quick Verify (from Eligibility Calculator)
+  const handleQuickVerifyDocument = async (docId: string, issuer: string): Promise<boolean> => {
+    if (!activeCitizenKey) return false;
+    try {
+      const res = await fetch('/api/digilocker/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          citizenKey: activeCitizenKey,
+          docId,
+          issuer,
+          source: docId.startsWith('samagra') || docId === 'khasra_b1' ? 'mp_edistrict' : 'digilocker',
+          wardOrBlock:
+            citizenProfile.areaType === 'urban'
+              ? `Ward ${citizenProfile.wardNumber || 1} (Indore IMC)`
+              : `${citizenProfile.blockName || 'Indore'} Janpad`,
+        }),
+      });
+      if (!res.ok) return false;
+      const data = await res.json();
+      if (Array.isArray(data?.documents)) {
+        setCitizenProfile(prev => ({
+          ...prev,
+          verifiedDocuments: mapDigiLockerRecordsToProfileMap(data.documents),
+        }));
+        fetchLiveApplicationsAndStats();
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  };
+
+  const handleSyncDocumentsFromServer = (docs: DigiLockerDocumentRecord[]) => {
+    setCitizenProfile(prev => ({
+      ...prev,
+      verifiedDocuments: mapDigiLockerRecordsToProfileMap(docs),
+    }));
+    fetchLiveApplicationsAndStats();
+  };
+
+  // Handle member selection from live Samagra Family Portal
   const handleSelectMemberForProfile = (member: FamilyMember, family: SamagraFamily) => {
-    const nextProfile = applySamagraMemberToProfile(member, family);
+    const nextProfile = buildProfileFromSamagraMember(member, family);
+    setCitizenProfile(nextProfile);
+    try {
+      localStorage.setItem(
+        ACTIVE_SAMAGRA_STORAGE_KEY,
+        JSON.stringify({ familyId: family.familyId, memberId: member.memberId })
+      );
+    } catch {
+      // ignore storage errors
+    }
+    syncCitizenDigiLockerWallet(member.memberId);
+
     if (firebaseUser) {
       handleUpdateCitizenProfileInCloud({
         displayName: nextProfile.fullName,
@@ -317,9 +524,18 @@ export default function App() {
     setActiveTab('schemes');
   };
 
-  // Handle Samagra ID Login inside AuthPage
   const handleSamagraSessionLogin = async (member: FamilyMember, family: SamagraFamily) => {
-    const nextProfile = applySamagraMemberToProfile(member, family);
+    const nextProfile = buildProfileFromSamagraMember(member, family);
+    setCitizenProfile(nextProfile);
+    try {
+      localStorage.setItem(
+        ACTIVE_SAMAGRA_STORAGE_KEY,
+        JSON.stringify({ familyId: family.familyId, memberId: member.memberId })
+      );
+    } catch {
+      // ignore
+    }
+    await syncCitizenDigiLockerWallet(member.memberId);
     if (firebaseUser) {
       await handleUpdateCitizenProfileInCloud({
         displayName: nextProfile.fullName,
@@ -341,7 +557,7 @@ export default function App() {
     }
   };
 
-  // Submit online application
+  // Submit live application to SQLite + Firestore
   const handleApplicationSubmit = async (appData: {
     schemeId: string;
     applicantName: string;
@@ -350,7 +566,6 @@ export default function App() {
     phone: string;
     wardOrBlock: string;
     areaType: 'urban' | 'rural';
-    kioskOperatorCode?: string;
   }) => {
     try {
       const res = await fetch('/api/applications', {
@@ -365,15 +580,15 @@ export default function App() {
 
       const data = await res.json();
       if (data.record) {
-        setApplications(prev => [data.record, ...prev]);
+        setApplications(prev => [data.record, ...prev.filter(a => a.arn !== data.record.arn)]);
+        fetchLiveApplicationsAndStats();
 
-        // Persist to user's Firestore cloud profile
         if (firebaseUser) {
-          const targetScheme = SCHEMES_DATABASE.find(s => s.id === appData.schemeId);
+          const targetScheme = schemes.find(s => s.id === appData.schemeId);
           saveApplicationToFirestore({
             arn: data.record.arn,
             schemeId: appData.schemeId,
-            schemeName: targetScheme ? targetScheme.title : 'Government Scheme',
+            schemeName: targetScheme ? targetScheme.title : data.record.schemeTitle,
             applicantName: appData.applicantName,
             applicantUid: firebaseUser.uid,
             samagraId: appData.samagraMemberId,
@@ -385,48 +600,35 @@ export default function App() {
         }
       }
     } catch (e) {
-      console.warn('Backend intake failed, creating local record:', e);
-      // Fallback local record
-      const randomArn = `YS-IND-2026-${Math.floor(10000 + Math.random() * 90000)}`;
-      const targetScheme = SCHEMES_DATABASE.find(s => s.id === appData.schemeId);
-      const newRec: ApplicationRecord = {
-        arn: randomArn,
-        schemeId: appData.schemeId,
-        schemeTitle: targetScheme ? targetScheme.title : 'Government Scheme',
-        schemeTitleHindi: targetScheme ? targetScheme.titleHindi : 'शासकीय योजना',
-        applicantName: appData.applicantName,
-        samagraMemberId: appData.samagraMemberId,
-        samagraFamilyId: appData.samagraFamilyId,
-        phone: appData.phone,
-        wardOrBlock: appData.wardOrBlock,
-        areaType: appData.areaType,
-        appliedDate: new Date().toISOString().split('T')[0],
-        currentStatus: 'submitted',
-        officerInCharge: 'Nodal Verification Officer, Indore Collectorate',
-        sanctionAmount: targetScheme?.financialEntitlement?.amount || 0,
-        remarks: 'Digital intake logged successfully.',
-        timeline: [
-          {
-            title: 'Application Intake Submitted',
-            titleHindi: 'आवेदन दर्ज हुआ',
-            date: 'Today 11:30 AM',
-            location: 'YojanaSetu Direct Portal',
-            status: 'completed',
-          },
-          {
-            title: 'Ward Field Verification',
-            titleHindi: 'वार्ड भौतिक सत्यापन',
-            date: 'In Progress',
-            location: appData.wardOrBlock,
-            status: 'in_progress',
-          },
-        ],
-      };
-      setApplications(prev => [newRec, ...prev]);
+      console.error('Live application submission failed:', e);
     }
 
     setIntakeScheme(null);
     setActiveTab('tracker');
+  };
+
+  // Live Admin update application status
+  const handleAdminUpdateApplicationStatus = async (
+    arn: string,
+    status: ApplicationRecord['currentStatus'],
+    remarks?: string
+  ) => {
+    try {
+      const res = await fetch(`/api/applications/${encodeURIComponent(arn)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status, remarks }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.record) {
+          setApplications(prev => prev.map(a => (a.arn === data.record.arn ? data.record : a)));
+          fetchLiveApplicationsAndStats();
+        }
+      }
+    } catch (err) {
+      console.error('Admin application status update failed:', err);
+    }
   };
 
   // Broadcast notification from admin
@@ -446,6 +648,11 @@ export default function App() {
       console.warn('Broadcast API call failed:', e);
     }
   };
+
+  // Filter schemes according to active search query & selected governance level
+  const filteredSchemes = searchSchemes(searchQuery, schemes, {
+    levelFilter: selectedLevel,
+  });
 
   // Compute eligibility results for active citizen profile
   const eligibilityResults = rankSchemesForCitizen(citizenProfile, schemes);
@@ -495,8 +702,14 @@ export default function App() {
                 currentLanguage={currentLanguage}
                 profile={citizenProfile}
                 setProfile={setCitizenProfile}
-                onApplyScheme={(scheme, prof) => setIntakeScheme(scheme)}
+                citizenKey={activeCitizenKey}
+                onQuickVerifyDocument={handleQuickVerifyDocument}
+                onApplyScheme={scheme => setIntakeScheme(scheme)}
                 onNavigateToDigilocker={() => setActiveTab('digilocker')}
+                onNavigateToSamagra={() => setActiveTab('samagra')}
+                schemesRealtimeReport={schemesRealtimeReport}
+                isCheckingRealtime={isCheckingRealtime}
+                onRunSchemesRealtimeCheck={handleRunSchemesRealtimeCheck}
                 savedSchemeIds={savedSchemes.map(s => s.schemeId)}
                 onToggleSaveScheme={handleToggleSaveScheme}
               />
@@ -519,7 +732,10 @@ export default function App() {
           <SamagraFamilyView
             currentLanguage={currentLanguage}
             schemes={schemes}
+            activeFamilyId={citizenProfile.samagraFamilyId}
+            activeMemberId={citizenProfile.samagraMemberId}
             onSelectMemberForProfile={handleSelectMemberForProfile}
+            onFamiliesChanged={fetchLiveApplicationsAndStats}
           />
         )}
 
@@ -527,7 +743,9 @@ export default function App() {
           <DigiLockerTrackerView
             currentLanguage={currentLanguage}
             profile={citizenProfile}
-            setProfile={setCitizenProfile}
+            citizenKey={activeCitizenKey}
+            onSyncDocumentsFromServer={handleSyncDocumentsFromServer}
+            onNavigateToSamagra={() => setActiveTab('samagra')}
           />
         )}
 
@@ -535,20 +753,7 @@ export default function App() {
           <ApplicationTrackerView
             currentLanguage={currentLanguage}
             applications={applications}
-          />
-        )}
-
-        {activeTab === 'yojanamitra' && (
-          <YojanaMitraChatbot
-            currentLanguage={currentLanguage}
-          />
-        )}
-
-        {activeTab === 'csc' && (
-          <CscOperatorMode
-            currentLanguage={currentLanguage}
-            schemes={schemes}
-            onSubmitApplication={handleApplicationSubmit}
+            onNavigateToSchemes={() => setActiveTab('schemes')}
           />
         )}
 
@@ -556,9 +761,19 @@ export default function App() {
           <AdminDashboard
             currentLanguage={currentLanguage}
             notifications={notifications}
+            applications={applications}
+            schemes={schemes}
+            samagraFamilies={samagraFamilies}
+            stats={districtStats}
+            schemesRealtimeReport={schemesRealtimeReport}
+            isCheckingRealtime={isCheckingRealtime}
+            onRunSchemesRealtimeCheck={handleRunSchemesRealtimeCheck}
+            onUpdateApplicationStatus={handleAdminUpdateApplicationStatus}
+            onCreateLiveScheme={handleCreateLiveScheme}
             onBroadcastNotification={handleBroadcastNotification}
             onFilterWardSchemes={(wardNum: number) => {
               setSearchQuery(`Ward ${wardNum}`);
+              setUserMode('citizen');
               setActiveTab('schemes');
             }}
           />
@@ -615,14 +830,14 @@ export default function App() {
         onClose={() => setIsSavedSchemesOpen(false)}
         savedSchemes={savedSchemes}
         allSchemes={schemes}
-        onRemoveScheme={(schemeId) => {
+        onRemoveScheme={schemeId => {
           if (firebaseUser) {
             removeSavedSchemeFromUserFirestore(firebaseUser.uid, schemeId).catch(err =>
               console.error('Failed to remove saved scheme:', err)
             );
           }
         }}
-        onSelectScheme={(scheme) => {
+        onSelectScheme={scheme => {
           setIntakeScheme(scheme);
         }}
         userEmail={firebaseUser?.email}
@@ -681,7 +896,7 @@ export default function App() {
         </div>
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 pt-6 border-t border-slate-800 text-center text-[11px] text-slate-500">
-          © 2026 YojanaSetu • District Administration Indore & Indore Municipal Corporation. Designed with accessible civic tech principles.
+          © 2026 YojanaSetu • District Administration Indore & Indore Municipal Corporation.
         </div>
       </footer>
     </div>

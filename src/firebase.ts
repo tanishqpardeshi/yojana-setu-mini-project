@@ -66,7 +66,7 @@ export interface UserProfileDoc {
   displayName: string;
   photoURL?: string;
   phone?: string;
-  role: 'citizen' | 'operator' | 'admin';
+  role: 'citizen' | 'admin';
   authMethod?: AuthMethod;
   samagraId?: string;
   samagraFamilyId?: string;
@@ -228,7 +228,7 @@ export async function signInWithGoogle(): Promise<AuthResult> {
 
     try {
       const existing = await getDoc(userRef);
-      const role: 'citizen' | 'operator' | 'admin' =
+      const role: 'citizen' | 'admin' =
         user.email === 'tanishqpardeshi9the12102@gmail.com' && user.emailVerified ? 'admin' : 'citizen';
 
       if (!existing.exists()) {

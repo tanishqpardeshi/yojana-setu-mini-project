@@ -50,6 +50,8 @@ export interface EligibilityRules {
   requiresGirlChild?: boolean;
 }
 
+export type PortalReachabilityStatus = 'unchecked' | 'reachable' | 'unreachable' | 'timeout';
+
 export interface Scheme {
   id: string;
   code: string;
@@ -77,6 +79,12 @@ export interface Scheme {
   applyUrl?: string;
   cscAvailable: boolean;
   activeBudgetCr?: number;
+  updatedAt?: string;
+  dataOrigin?: 'baseline_catalog' | 'admin_live';
+  portalStatus?: PortalReachabilityStatus;
+  portalHttpStatus?: number | null;
+  portalCheckedAt?: string | null;
+  portalLatencyMs?: number | null;
 }
 
 export interface DocumentInfo {
@@ -86,6 +94,24 @@ export interface DocumentInfo {
   issuingAuthority: string;
   isDigiLockerAvailable: boolean;
   category: 'identity' | 'address' | 'income' | 'land' | 'caste' | 'banking';
+}
+
+export interface VerifiedDocumentMeta {
+  verified: boolean;
+  source: 'digilocker' | 'mp_edistrict' | 'manual';
+  docNumber?: string;
+  issuer?: string;
+  verifiedAt?: string;
+}
+
+export interface DigiLockerDocumentRecord {
+  citizenKey: string;
+  docId: string;
+  docNumber: string;
+  source: 'digilocker' | 'mp_edistrict' | 'manual';
+  issuer: string;
+  verified: boolean;
+  verifiedAt: string;
 }
 
 export interface CitizenProfile {
@@ -108,7 +134,8 @@ export interface CitizenProfile {
   isIndoreResident: boolean;
   samagraFamilyId?: string;
   samagraMemberId?: string;
-  verifiedDocuments: Record<string, { verified: boolean; source: 'digilocker' | 'mp_edistrict' | 'manual'; docNumber?: string }>;
+  phone?: string;
+  verifiedDocuments: Record<string, VerifiedDocumentMeta>;
 }
 
 export interface FamilyMember {
@@ -119,10 +146,13 @@ export interface FamilyMember {
   relationHindi: string;
   age: number;
   gender: Gender;
+  category?: Category;
   occupation: OccupationType;
   ekycStatus: boolean;
   dbtActive: boolean;
   annualIncome?: number;
+  landHoldingHectares?: number;
+  hasDisability?: boolean;
   maritalStatus?: MaritalStatus;
 }
 
@@ -134,6 +164,7 @@ export interface SamagraFamily {
   address: string;
   rationCardType: 'APL' | 'BPL' | 'Antyodaya';
   members: FamilyMember[];
+  createdAt?: string;
 }
 
 export interface RuleEvaluationResult {
@@ -164,7 +195,7 @@ export interface ApplicationTimelineEvent {
 }
 
 export interface ApplicationRecord {
-  arn: string; // e.g. YS-IND-2026-10492
+  arn: string;
   schemeId: string;
   schemeTitle: string;
   schemeTitleHindi: string;
@@ -179,14 +210,20 @@ export interface ApplicationRecord {
   timeline: ApplicationTimelineEvent[];
   officerInCharge: string;
   sanctionAmount?: number;
-  kioskOperatorCode?: string;
   remarks: string;
 }
 
 export interface LiveNotification {
   id: string;
   timestamp: string;
-  type: 'application_filed' | 'dbt_disbursed' | 'ward_verification' | 'csc_intake' | 'sanction_order';
+  type:
+    | 'application_filed'
+    | 'dbt_disbursed'
+    | 'ward_verification'
+    | 'sanction_order'
+    | 'samagra_synced'
+    | 'digilocker_verified'
+    | 'schemes_synced';
   message: string;
   messageHindi: string;
   wardOrBlock: string;
@@ -196,48 +233,63 @@ export interface LiveNotification {
 
 export type SupportedLanguage = 'en' | 'hi' | 'malwi';
 
-export type UserMode = 'citizen' | 'csc_operator' | 'admin';
-
-export type RagChunkType = 'eligibility' | 'benefits' | 'documents' | 'nodal_office' | 'application_process';
-
-export interface RagChunk {
-  id: string;
-  schemeId: string;
-  schemeTitle: string;
-  schemeTitleHindi: string;
-  governanceLevel: GovernanceLevel;
-  chunkType: RagChunkType;
-  title: string;
-  content: string;
-  keywords: string[];
-  malwiKeywords: string[];
-}
-
-export interface RagSearchResult {
-  chunk: RagChunk;
-  score: number; // Hybrid combined score
-  matchedTerms: string[];
-  sourceLevel: string;
-  confidencePercent: number; // e.g. 94%
-  bm25Score?: number;
-  cosineSimilarity?: number;
-}
-
-export interface RagQueryResponse {
-  query: string;
-  groundedAnswer: string;
-  retrievedChunks: RagSearchResult[];
-  modelUsed: string;
-  latencyMs: number;
-}
+export type UserMode = 'citizen' | 'admin';
 
 export interface DistrictStats {
   totalSchemes: number;
   totalApplications: number;
+  pendingApplications: number;
+  approvedApplications: number;
+  disbursedApplications: number;
+  totalDbtDisbursedInr: number;
   totalDbtDisbursedCr: number;
+  registeredFamilies: number;
+  registeredMembers: number;
+  verifiedDocumentsCount: number;
   activeWards: number;
   activeJanpadBlocks: number;
-  avgTurnaroundDays: number;
   approvalRatePercent: number;
-  grievanceRedressalPercent: number;
+}
+
+export interface WardLiveMetric {
+  wardNumber: number;
+  applicationsCount: number;
+  approvedCount: number;
+  dbtDisbursedInr: number;
+  registeredFamiliesCount: number;
+  approvalRatePercent: number | null;
+}
+
+export interface JanpadLiveMetric {
+  blockName: JanpadBlock;
+  applicationsCount: number;
+  approvedCount: number;
+  dbtDisbursedInr: number;
+  registeredFamiliesCount: number;
+}
+
+export interface PortalDomainCheckResult {
+  portalUrl: string;
+  status: PortalReachabilityStatus;
+  httpStatus: number | null;
+  latencyMs: number | null;
+  checkedAt: string | null;
+  schemeCount: number;
+}
+
+export interface SchemesRealtimeReport {
+  isDatabaseLive: boolean;
+  hasExternalRealtimeFeed: boolean;
+  verdict: 'baseline_unverified' | 'live_verified' | 'partially_verified' | 'unreachable';
+  verdictLabel: string;
+  verdictDetail: string;
+  totalSchemes: number;
+  baselineSchemesCount: number;
+  adminLiveSchemesCount: number;
+  checkedSchemesCount: number;
+  reachableSchemesCount: number;
+  unreachableSchemesCount: number;
+  lastDatabaseUpdateAt: string | null;
+  lastPortalCheckAt: string | null;
+  portals: PortalDomainCheckResult[];
 }

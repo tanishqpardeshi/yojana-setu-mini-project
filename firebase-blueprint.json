@@ -2,7 +2,7 @@
   "entities": {
     "UserProfile": {
       "title": "UserProfile",
-      "description": "Citizen or operator profile containing Firebase authentication details, Samagra linking, and Indore demographic attributes",
+      "description": "Citizen or admin profile containing Firebase authentication details, Samagra linking, and Indore demographic attributes",
       "type": "object",
       "properties": {
         "uid": { "type": "string", "maxLength": 128 },
@@ -10,7 +10,7 @@
         "displayName": { "type": "string", "maxLength": 120 },
         "photoURL": { "type": "string", "maxLength": 500 },
         "phone": { "type": "string", "maxLength": 20 },
-        "role": { "type": "string", "enum": ["citizen", "operator", "admin"] },
+        "role": { "type": "string", "enum": ["citizen", "admin"] },
         "authMethod": { "type": "string", "enum": ["google", "email", "samagra"] },
         "samagraId": { "type": "string", "maxLength": 16 },
         "samagraFamilyId": { "type": "string", "maxLength": 16 },
@@ -76,9 +76,26 @@
         "createdAt": { "type": "string", "maxLength": 40 }
       },
       "required": ["title", "message", "priority", "createdAt"]
+    },
+    "AdminRole": {
+      "title": "AdminRole",
+      "description": "Server/Console-provisioned District Administrator authorization record",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 160 },
+        "role": { "type": "string", "enum": ["admin"] },
+        "active": { "type": "boolean" },
+        "grantedAt": { "type": "string", "maxLength": 40 }
+      },
+      "required": ["uid", "email", "role", "active"]
     }
   },
   "firestore": {
+    "/admins/{adminId}": {
+      "schema": "AdminRole",
+      "description": "Trusted District Administrator role registry (read-only to owner/admin, no client writes)"
+    },
     "/users/{userId}": {
       "schema": "UserProfile",
       "description": "User authentication & citizen demographic profile document"

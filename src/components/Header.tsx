@@ -2,10 +2,8 @@ import React from 'react';
 import { 
   Building2, 
   User, 
-  Laptop, 
   LayoutDashboard, 
   PhoneCall, 
-  Search,
   Languages,
   Bookmark,
   LogOut
@@ -106,22 +104,22 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       {/* Main Brand & Nav Bar */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex flex-wrap items-center justify-between gap-3">
+      <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 py-2.5 flex flex-wrap lg:flex-nowrap items-center justify-between gap-2.5">
         {/* Logo / Branding */}
-        <div className="flex items-center space-x-3 cursor-pointer" onClick={() => selectCitizenTab('schemes')}>
-          <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-amber-500 via-orange-600 to-amber-700 flex items-center justify-center text-white shadow-md shadow-amber-500/20 border border-amber-300/40">
-            <Building2 className="w-6 h-6" />
+        <div className="flex items-center space-x-2.5 cursor-pointer shrink-0" onClick={() => selectCitizenTab('schemes')}>
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 via-orange-600 to-amber-700 flex items-center justify-center text-white shadow-md shadow-amber-500/20 border border-amber-300/40 shrink-0">
+            <Building2 className="w-5 h-5" />
           </div>
           <div>
             <div className="flex items-center space-x-2">
-              <span className="text-xl sm:text-2xl font-black tracking-tight text-slate-900 font-heading">
+              <span className="text-lg sm:text-xl font-black tracking-tight text-slate-900 font-heading">
                 Yojana<span className="text-amber-600">Setu</span>
               </span>
-              <span className="bg-amber-100 text-amber-800 text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full border border-amber-300">
+              <span className="bg-amber-100 text-amber-800 text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full border border-amber-300 whitespace-nowrap">
                 Indore Portal
               </span>
             </div>
-            <p className="text-xs text-slate-500 font-medium">
+            <p className="text-[11px] text-slate-500 font-medium whitespace-nowrap">
               योजना सेतु • 6-स्तरीय नागरिक अधिकार व पात्रता मंच
             </p>
           </div>
@@ -131,7 +129,7 @@ export const Header: React.FC<HeaderProps> = ({
         <nav className="hidden lg:flex items-center space-x-0.5 xl:space-x-1 bg-slate-100 p-1 rounded-xl border border-slate-200 shrink-0">
           <button
             onClick={() => selectCitizenTab('schemes')}
-            className={`px-2.5 xl:px-3 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap ${
+            className={`px-2.5 xl:px-3 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap cursor-pointer ${
               activeTab === 'schemes' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
@@ -141,7 +139,7 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
           <button
             onClick={() => selectCitizenTab('governance')}
-            className={`px-2.5 xl:px-3 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap ${
+            className={`px-2.5 xl:px-3 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap cursor-pointer ${
               activeTab === 'governance' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
@@ -153,7 +151,7 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
           <button
             onClick={() => selectCitizenTab('samagra')}
-            className={`px-2.5 xl:px-3 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap ${
+            className={`px-2.5 xl:px-3 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap cursor-pointer ${
               activeTab === 'samagra' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
@@ -165,7 +163,7 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
           <button
             onClick={() => selectCitizenTab('digilocker')}
-            className={`px-2.5 xl:px-3 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap ${
+            className={`px-2.5 xl:px-3 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap cursor-pointer ${
               activeTab === 'digilocker' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
@@ -177,7 +175,7 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
           <button
             onClick={() => selectCitizenTab('tracker')}
-            className={`px-2.5 xl:px-3 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap ${
+            className={`px-2.5 xl:px-3 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap cursor-pointer ${
               activeTab === 'tracker' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
@@ -185,23 +183,15 @@ export const Header: React.FC<HeaderProps> = ({
               <><span>Track ARN</span><span className="hidden xl:inline"> Status</span></>
             )}
           </button>
-          <button
-            onClick={() => selectCitizenTab('yojanamitra')}
-            className={`px-2.5 xl:px-3 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap ${
-              activeTab === 'yojanamitra' ? 'bg-amber-500 text-slate-950 shadow-xs font-bold' : 'text-amber-700 hover:text-amber-900'
-            }`}
-          >
-            AI योजना मित्र
-          </button>
         </nav>
 
-        {/* Right Mode Switcher, Samagra Shortcut & Firebase Auth */}
-        <div className="flex items-center space-x-2">
+        {/* Right Mode Switcher, Saved Shortcut & Firebase Auth */}
+        <div className="flex items-center space-x-2 shrink-0">
           {/* Saved Schemes in Firestore shortcut */}
           {onOpenSavedSchemes && (
             <button
               onClick={onOpenSavedSchemes}
-              className="inline-flex items-center space-x-1 px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-amber-50 hover:bg-amber-100 rounded-lg transition border border-amber-200"
+              className="inline-flex items-center space-x-1 px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-amber-50 hover:bg-amber-100 rounded-lg transition border border-amber-200 cursor-pointer whitespace-nowrap"
               title="View Bookmarked Schemes (Stored in Firebase Firestore)"
             >
               <Bookmark className="w-3.5 h-3.5 text-amber-600 fill-amber-500" />
@@ -213,16 +203,6 @@ export const Header: React.FC<HeaderProps> = ({
               )}
             </button>
           )}
-
-          {/* Quick Samagra Search button */}
-          <button
-            onClick={onOpenSamagraModal}
-            className="hidden md:inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-300"
-            title="Search by 8-Digit Samagra Family ID or 9-Digit Member ID"
-          >
-            <Search className="w-3.5 h-3.5 text-slate-500" />
-            <span>Samagra ID</span>
-          </button>
 
           {/* Firebase Auth / Citizen Login & Profile Menu */}
           {firebaseUser ? (
@@ -276,12 +256,12 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           )}
 
-          {/* User Mode Pills */}
+          {/* User Mode Switcher (Citizen & Admin) */}
           <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200">
             <button
               onClick={() => {
                 setUserMode('citizen');
-                if (activeTab === 'csc' || activeTab === 'admin') {
+                if (activeTab === 'admin') {
                   setActiveTab('schemes');
                 }
               }}
@@ -294,21 +274,6 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <User className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Citizen</span>
-            </button>
-            <button
-              onClick={() => {
-                setUserMode('csc_operator');
-                setActiveTab('csc');
-              }}
-              className={`inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition ${
-                userMode === 'csc_operator'
-                  ? 'bg-blue-600 text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-              title="CSC / MPOnline Kiosk Operator Mode"
-            >
-              <Laptop className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Kiosk / CSC</span>
             </button>
             <button
               onClick={() => {
@@ -370,14 +335,6 @@ export const Header: React.FC<HeaderProps> = ({
           }`}
         >
           Track ARN
-        </button>
-        <button
-          onClick={() => selectCitizenTab('yojanamitra')}
-          className={`px-3 py-1 rounded-lg text-xs whitespace-nowrap font-medium ${
-            activeTab === 'yojanamitra' ? 'bg-amber-600 text-white font-bold' : 'bg-amber-100 text-amber-900 border border-amber-300'
-          }`}
-        >
-          AI Mitra
         </button>
         <button
           onClick={() => selectCitizenTab('auth')}

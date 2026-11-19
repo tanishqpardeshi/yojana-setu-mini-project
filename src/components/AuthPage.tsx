@@ -41,7 +41,6 @@ import {
   signInWithGoogle,
   UserProfileDoc,
 } from '../firebase';
-import { MOCK_SAMAGRA_FAMILIES } from '../data/samagraMockProfiles';
 
 interface AuthPageProps {
   currentLanguage: SupportedLanguage;
@@ -161,11 +160,23 @@ export const AuthPage: React.FC<AuthPageProps> = ({
   const [isMpDomicile, setIsMpDomicile] = useState(true);
   const [isIndoreResident, setIsIndoreResident] = useState(true);
 
-  // Samagra lookup state
-  const [samagraQuery, setSamagraQuery] = useState('48921840');
-  const [samagraFamilyResult, setSamagraFamilyResult] = useState<SamagraFamily | null>(MOCK_SAMAGRA_FAMILIES[0]);
+  // Samagra lookup state (live API only)
+  const [samagraQuery, setSamagraQuery] = useState('');
+  const [samagraFamilyResult, setSamagraFamilyResult] = useState<SamagraFamily | null>(null);
+  const [liveSamagraList, setLiveSamagraList] = useState<SamagraFamily[]>([]);
   const [samagraLoading, setSamagraLoading] = useState(false);
   const [samagraError, setSamagraError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch('/api/samagra')
+      .then(r => (r.ok ? r.json() : null))
+      .then(data => {
+        if (Array.isArray(data?.families)) {
+          setLiveSamagraList(data.families);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Operational state
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -373,27 +384,13 @@ export const AuthPage: React.FC<AuthPageProps> = ({
           return;
         }
       }
-      // Fallback to local mock families
-      const localMatch = MOCK_SAMAGRA_FAMILIES.find(
-        f => f.familyId === idToSearch || f.members.some(m => m.memberId === idToSearch)
+      setSamagraFamilyResult(null);
+      setSamagraError(
+        `No live Samagra record found for "${idToSearch}". Register your Samagra household in the Samagra Family portal first.`
       );
-      if (localMatch) {
-        setSamagraFamilyResult(localMatch);
-      } else {
-        setSamagraFamilyResult(null);
-        setSamagraError(
-          `No Samagra record found for "${idToSearch}". Try sample IDs: 48921840, 71203945, 39510482, or 84019283.`
-        );
-      }
     } catch {
-      const localMatch = MOCK_SAMAGRA_FAMILIES.find(
-        f => f.familyId === idToSearch || f.members.some(m => m.memberId === idToSearch)
-      );
-      if (localMatch) {
-        setSamagraFamilyResult(localMatch);
-      } else {
-        setSamagraError('Unable to reach Samagra directory. Try one of the sample IDs below.');
-      }
+      setSamagraFamilyResult(null);
+      setSamagraError('Unable to reach live Samagra directory API. Please try again.');
     } finally {
       setSamagraLoading(false);
     }
@@ -741,7 +738,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                       type="text"
                       value={samagraFamilyId}
                       onChange={e => setSamagraFamilyId(e.target.value)}
-                      placeholder="e.g. 48921840"
+                      placeholder="8-digit Samagra Family ID"
                       maxLength={16}
                       className="w-full px-3.5 py-2.5 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono tabular-nums"
                     />
@@ -754,7 +751,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                       type="text"
                       value={samagraMemberId}
                       onChange={e => setSamagraMemberId(e.target.value)}
-                      placeholder="e.g. 109283742"
+                      placeholder="9-digit Samagra Member ID"
                       maxLength={16}
                       className="w-full px-3.5 py-2.5 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono tabular-nums"
                     />
@@ -1108,25 +1105,35 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2 text-xs">
-                      <span className="text-slate-500">Sample Households:</span>
-                      {[
-                        { id: '48921840', label: 'Sharma (Ward 72)' },
-                        { id: '71203945', label: 'Patel (Depalpur)' },
-                        { id: '39510482', label: 'Verma (Ward 60)' },
-                        { id: '84019283', label: 'Bhil (Mhow)' },
-                      ].map(sample => (
-                        <button
-                          key={sample.id}
-                          type="button"
-                          onClick={() => {
-                            setSamagraQuery(sample.id);
-                            handleSamagraSearch(sample.id);
-                          }}
-                          className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-amber-100 text-slate-700 hover:text-amber-950 font-medium transition cursor-pointer"
-                        >
-                          {sample.label} · <span className="font-mono tabular-nums">{sample.id}</span>
-                        </button>
-                      ))}
+                      {liveSamagraList.length > 0 ? (
+                        <>
+                          <span className="text-slate-500">Live Registered Households:</span>
+                          {liveSamagraList.slice(0, 5).map(fam => (
+                            <button
+                              key={fam.familyId}
+                              type="button"
+                              onClick={() => {
+                                setSamagraQuery(fam.familyId);
+                                handleSamagraSearch(fam.familyId);
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-amber-100 text-slate-700 hover:text-amber-950 font-medium transition cursor-pointer"
+                            >
+                              {fam.headName} · <span className="font-mono tabular-nums">{fam.familyId}</span>
+                            </button>
+                          ))}
+                        </>
+                      ) : (
+                        <div className="w-full flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+                          <span className="text-slate-600">No Samagra household registered yet in the live database.</span>
+                          <button
+                            type="button"
+                            onClick={() => onNavigateTab('samagra')}
+                            className="text-amber-700 hover:text-amber-900 font-bold underline cursor-pointer whitespace-nowrap"
+                          >
+                            Register Samagra ID →
+                          </button>
+                        </div>
+                      )}
                     </div>
 
                     {samagraError && (
@@ -1215,7 +1222,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                             value={fullName}
                             onChange={e => setFullName(e.target.value)}
                             required
-                            placeholder="e.g. Sunita Sharma"
+                            placeholder="Enter full name as per Samagra"
                             maxLength={120}
                             className="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500"
                           />

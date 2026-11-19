@@ -1,52 +1,52 @@
 import React, { useState, useMemo } from 'react';
-import { 
-  CheckCircle, 
-  AlertTriangle, 
-  XCircle, 
-  FileText, 
-  ArrowRight, 
-  Sparkles, 
-  Sliders, 
-  MapPin, 
-  Briefcase, 
-  Users, 
-  IndianRupee, 
+import {
+  CheckCircle,
+  AlertTriangle,
+  XCircle,
+  FileText,
+  ArrowRight,
+  Sliders,
+  MapPin,
   ExternalLink,
-  ShieldAlert,
   Info,
   Bookmark,
   Check,
-  Plus
+  RefreshCw,
+  Globe,
+  ShieldCheck,
+  Loader2,
 } from 'lucide-react';
-import { 
-  CitizenProfile, 
-  Scheme, 
-  SchemeEligibilityResult, 
+import {
+  CitizenProfile,
+  Scheme,
+  SchemeEligibilityResult,
+  SchemesRealtimeReport,
   SupportedLanguage,
   JanpadBlock,
   Category,
   Gender,
   OccupationType,
-  MaritalStatus
+  MaritalStatus,
 } from '../types';
-import { IMC_WARDS, JANPAD_BLOCKS, GOVERNANCE_LEVEL_NAMES } from '../data/indoreGovernance';
-import { evaluateSchemeEligibility, rankSchemesForCitizen } from '../utils/rulesEngine';
+import { IMC_WARDS, JANPAD_BLOCKS, GOVERNANCE_LEVEL_NAMES, STANDARD_DOCUMENTS } from '../data/indoreGovernance';
+import { rankSchemesForCitizen } from '../utils/rulesEngine';
+import { resolveSchemePortalUrl } from '../utils/liveDataEngine';
 
-export const DOCUMENT_NAMES: Record<string, { en: string; hi: string; sampleNumber: string }> = {
-  aadhaar: { en: 'Aadhaar Card', hi: 'आधार कार्ड', sampleNumber: 'UID-XXXX-XXXX-8192' },
-  samagra_member: { en: 'Samagra Member ID', hi: 'समग्र सदस्य आईडी', sampleNumber: 'SPR-109283742' },
-  samagra_family: { en: 'Samagra Family ID', hi: 'समग्र परिवार आईडी', sampleNumber: 'SPR-48921840' },
-  mp_domicile: { en: 'MP Domicile Certificate', hi: 'म.प्र. मूल निवासी प्रमाण पत्र', sampleNumber: 'MP-DOM-2024-912' },
-  income_cert: { en: 'Income Certificate', hi: 'आय प्रमाण पत्र', sampleNumber: 'MP-INC-2026-4421' },
-  khasra_b1: { en: 'Land Record Khasra B-1', hi: 'खसरा / बी-1 खतौनी', sampleNumber: 'BHULEKH-IND-8819' },
-  caste_cert: { en: 'Caste Certificate', hi: 'जाति प्रमाण पत्र', sampleNumber: 'MP-CST-2025-1029' },
-  bank_dbt: { en: 'Bank Passbook (DBT Active)', hi: 'बैंक खाता डीबीटी पासबुक', sampleNumber: 'NPCI-BOI-8192' },
-  udid_card: { en: 'UDID Disability Card', hi: 'यूडीआईडी दिव्यांग प्रमाण पत्र', sampleNumber: 'MP-DIS-2023-401' },
-  vendor_id: { en: 'Street Vendor ID / LOR', hi: 'स्ट्रीट वेंडर पहचान पत्र', sampleNumber: 'IMC-SV-2026-771' },
-  bpl_ration: { en: 'BPL Ration Card', hi: 'बीपीएल राशन कार्ड', sampleNumber: 'NFSA-MP-49120' },
-  sambal_card: { en: 'Sambal 2.0 Card', hi: 'संबल 2.0 कार्ड', sampleNumber: 'SAMBAL-2026-993' },
-  elec_bill: { en: 'Electricity Bill', hi: 'विद्युत बिल', sampleNumber: 'MPPKVVCL-99214' },
-  birth_cert: { en: 'Birth Certificate', hi: 'जन्म प्रमाण पत्र', sampleNumber: 'IMC-BIRTH-2022-09' },
+export const DOCUMENT_NAMES: Record<string, { en: string; hi: string }> = {
+  aadhaar: { en: 'Aadhaar Card', hi: 'आधार कार्ड' },
+  samagra_member: { en: 'Samagra Member ID', hi: 'समग्र सदस्य आईडी' },
+  samagra_family: { en: 'Samagra Family ID', hi: 'समग्र परिवार आईडी' },
+  mp_domicile: { en: 'MP Domicile Certificate', hi: 'म.प्र. मूल निवासी प्रमाण पत्र' },
+  income_cert: { en: 'Income Certificate', hi: 'आय प्रमाण पत्र' },
+  khasra_b1: { en: 'Land Record Khasra B-1', hi: 'खसरा / बी-1 खतौनी' },
+  caste_cert: { en: 'Caste Certificate', hi: 'जाति प्रमाण पत्र' },
+  bank_dbt: { en: 'Bank Passbook (DBT Active)', hi: 'बैंक खाता डीबीटी पासबुक' },
+  udid_card: { en: 'UDID Disability Card', hi: 'यूडीआईडी दिव्यांग प्रमाण पत्र' },
+  vendor_id: { en: 'Street Vendor ID / LOR', hi: 'स्ट्रीट वेंडर पहचान पत्र' },
+  bpl_ration: { en: 'BPL Ration Card', hi: 'बीपीएल राशन कार्ड' },
+  sambal_card: { en: 'Sambal 2.0 Card', hi: 'संबल 2.0 कार्ड' },
+  elec_bill: { en: 'Electricity Bill', hi: 'विद्युत बिल' },
+  birth_cert: { en: 'Birth Certificate', hi: 'जन्म प्रमाण पत्र' },
 };
 
 interface EligibilityCalculatorProps {
@@ -54,8 +54,14 @@ interface EligibilityCalculatorProps {
   currentLanguage: SupportedLanguage;
   profile: CitizenProfile;
   setProfile: React.Dispatch<React.SetStateAction<CitizenProfile>>;
+  citizenKey: string | null;
+  onQuickVerifyDocument: (docId: string, issuer: string) => Promise<boolean>;
   onApplyScheme: (scheme: Scheme, profile: CitizenProfile) => void;
   onNavigateToDigilocker: () => void;
+  onNavigateToSamagra: () => void;
+  schemesRealtimeReport: SchemesRealtimeReport | null;
+  isCheckingRealtime: boolean;
+  onRunSchemesRealtimeCheck: () => Promise<void>;
   savedSchemeIds?: string[];
   onToggleSaveScheme?: (scheme: Scheme) => void;
 }
@@ -65,31 +71,41 @@ export const EligibilityCalculator: React.FC<EligibilityCalculatorProps> = ({
   currentLanguage,
   profile,
   setProfile,
+  citizenKey,
+  onQuickVerifyDocument,
   onApplyScheme,
   onNavigateToDigilocker,
+  onNavigateToSamagra,
+  schemesRealtimeReport,
+  isCheckingRealtime,
+  onRunSchemesRealtimeCheck,
   savedSchemeIds = [],
   onToggleSaveScheme,
 }) => {
   const [filterTab, setFilterTab] = useState<'all' | 'eligible' | 'likely' | 'not_eligible'>('all');
   const [selectedSchemeDetail, setSelectedSchemeDetail] = useState<SchemeEligibilityResult | null>(null);
   const [resolvedDocToast, setResolvedDocToast] = useState<string | null>(null);
+  const [verifyingDocId, setVerifyingDocId] = useState<string | null>(null);
 
-  const handleQuickVerifyDoc = (docId: string) => {
-    const meta = DOCUMENT_NAMES[docId] || { en: docId, hi: docId, sampleNumber: `DL-${docId.toUpperCase()}` };
-    setProfile(p => ({
-      ...p,
-      verifiedDocuments: {
-        ...(p.verifiedDocuments || {}),
-        [docId]: {
-          verified: true,
-          source: 'digilocker',
-          docNumber: meta.sampleNumber,
-          verifiedAt: new Date().toISOString(),
-        },
-      },
-    }));
-    setResolvedDocToast(`${meta.en} (${meta.hi}) verified in DigiLocker! Recalculating eligibility to 100% Eligible.`);
-    setTimeout(() => setResolvedDocToast(null), 4000);
+  const handleQuickVerifyDoc = async (docId: string) => {
+    if (!citizenKey) {
+      setResolvedDocToast('Link or register a live Samagra ID first so DigiLocker documents persist to your wallet.');
+      onNavigateToDigilocker();
+      return;
+    }
+
+    const meta = DOCUMENT_NAMES[docId] || { en: docId, hi: docId };
+    const std = STANDARD_DOCUMENTS.find(d => d.id === docId);
+    setVerifyingDocId(docId);
+    try {
+      const ok = await onQuickVerifyDocument(docId, std?.issuingAuthority || 'DigiLocker India');
+      if (ok) {
+        setResolvedDocToast(`${meta.en} (${meta.hi}) verified & persisted in live DigiLocker Wallet. Eligibility updated.`);
+        setTimeout(() => setResolvedDocToast(null), 4000);
+      }
+    } finally {
+      setVerifyingDocId(null);
+    }
   };
 
   // Real-time evaluation of all schemes
@@ -113,6 +129,70 @@ export const EligibilityCalculator: React.FC<EligibilityCalculatorProps> = ({
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      {/* Live Schemes Real-Time Verification Status Strip */}
+      <div className="mb-6 bg-white rounded-2xl border border-slate-200 p-4 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div className="flex items-start space-x-3">
+          <div
+            className={`p-2 rounded-xl border shrink-0 ${
+              schemesRealtimeReport?.verdict === 'live_verified'
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                : schemesRealtimeReport?.verdict === 'partially_verified'
+                ? 'bg-amber-50 border-amber-200 text-amber-700'
+                : 'bg-slate-50 border-slate-200 text-slate-600'
+            }`}
+          >
+            <Globe className="w-5 h-5" />
+          </div>
+          <div className="space-y-0.5">
+            <div className="flex items-center flex-wrap gap-2">
+              <span className="text-xs font-black text-slate-900">
+                Schemes Data Real-Time Status:
+              </span>
+              <span
+                className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${
+                  schemesRealtimeReport?.verdict === 'live_verified'
+                    ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                    : schemesRealtimeReport?.verdict === 'partially_verified'
+                    ? 'bg-amber-100 text-amber-800 border-amber-300'
+                    : 'bg-slate-100 text-slate-700 border-slate-300'
+                }`}
+              >
+                {schemesRealtimeReport?.verdictLabel || 'Loading Live Catalog Status...'}
+              </span>
+            </div>
+            <p className="text-xs text-slate-500">
+              {schemesRealtimeReport?.verdictDetail ||
+                'Schemes are synced from the live SQLite database. Click below to verify official government portals right now.'}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          {!profile.samagraMemberId && (
+            <button
+              type="button"
+              onClick={onNavigateToSamagra}
+              className="px-3.5 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 text-xs font-bold transition cursor-pointer whitespace-nowrap"
+            >
+              Link Samagra ID
+            </button>
+          )}
+          <button
+            type="button"
+            disabled={isCheckingRealtime}
+            onClick={onRunSchemesRealtimeCheck}
+            className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-60 text-white text-xs font-bold inline-flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap"
+          >
+            {isCheckingRealtime ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="w-3.5 h-3.5 text-amber-400" />
+            )}
+            <span>{isCheckingRealtime ? 'Checking Official Portals...' : 'Verify Official Portals Live'}</span>
+          </button>
+        </div>
+      </div>
+
       {/* Section Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
         <div>
@@ -130,9 +210,9 @@ export const EligibilityCalculator: React.FC<EligibilityCalculatorProps> = ({
               : 'Find My Schemes & Entitlement Calculator'}
           </h2>
           <p className="text-sm text-slate-500">
-            {currentLanguage === 'hi'
-              ? 'अपनी जानकारी दर्ज कीजिए — नियम इंजन तुरंत आपकी पात्रता, कारण एवं आवश्यक दस्तावेज दिखाएगा।'
-              : 'Adjust your citizen profile below. The declarative rule engine recomputes eligibility instantly.'}
+            {profile.samagraMemberId
+              ? `Active Live Profile: ${profile.fullName || 'Citizen'} (Samagra Member ID: ${profile.samagraMemberId})`
+              : 'Adjust parameters below or link your live Samagra ID & DigiLocker Wallet for persistent verification.'}
           </p>
         </div>
 
@@ -270,7 +350,7 @@ export const EligibilityCalculator: React.FC<EligibilityCalculatorProps> = ({
                 </select>
               </div>
               <div>
-                <label className="block text-[11px] font-medium text-slate-500">Gram Panchayat Sample:</label>
+                <label className="block text-[11px] font-medium text-slate-500">Gram Panchayats in Block:</label>
                 <div className="text-xs text-slate-700 bg-slate-50 p-2 rounded-lg border border-slate-200 font-mono">
                   {JANPAD_BLOCKS.find(b => b.name === (profile.blockName || 'Depalpur'))?.popularPanchayats.join(', ')}
                 </div>
@@ -678,7 +758,7 @@ export const EligibilityCalculator: React.FC<EligibilityCalculatorProps> = ({
                                 <span className="font-semibold">{docMeta.en}</span>
                                 <span className="text-[10px] text-slate-500 group-hover:text-emerald-700">({docMeta.hi})</span>
                                 <span className="ml-1 text-[10px] font-bold bg-amber-100 group-hover:bg-emerald-200 text-amber-900 group-hover:text-emerald-900 px-1 rounded">
-                                  + Verify
+                                  {verifyingDocId === docId ? 'Verifying...' : '+ Verify'}
                                 </span>
                               </button>
                             );
@@ -760,10 +840,29 @@ export const EligibilityCalculator: React.FC<EligibilityCalculatorProps> = ({
 
             {/* Scheme Details */}
             <div className="mt-4 space-y-4">
-              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs space-y-1">
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs space-y-1.5">
                 <div><strong>Department:</strong> {selectedSchemeDetail.scheme.department}</div>
                 <div><strong>Nodal Office in Indore:</strong> {selectedSchemeDetail.scheme.nodalOfficeIndore}</div>
                 <div><strong>District Helpline:</strong> {selectedSchemeDetail.scheme.helpline}</div>
+                <div className="flex items-center justify-between flex-wrap gap-2 pt-1.5 border-t border-slate-200">
+                  <div className="flex items-center gap-1.5">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>
+                      <strong>Official Portal:</strong>{' '}
+                      <a
+                        href={resolveSchemePortalUrl(selectedSchemeDetail.scheme)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-amber-700 hover:underline font-mono"
+                      >
+                        {resolveSchemePortalUrl(selectedSchemeDetail.scheme)}
+                      </a>
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white border border-slate-300 text-slate-700 uppercase">
+                    Portal: {selectedSchemeDetail.scheme.portalStatus || 'unchecked'}
+                  </span>
+                </div>
               </div>
 
               {/* Individual Rules Evaluation Breakdown */}

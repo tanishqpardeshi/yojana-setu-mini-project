@@ -1,22 +1,17 @@
 import express, { NextFunction, Request, Response } from 'express';
 import { createServer as createViteServer } from 'vite';
-import { GoogleGenAI } from '@google/genai';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { dbService } from './server/db.js';
-import { 
-  buildSchemeChunks, 
-  hybridRagSearch, 
-  formatRagContextForPrompt,
-  generateLocalMitraAnswer
-} from './src/utils/ragEngine.js';
-import { 
-  ApplicationRecord, 
-  LiveNotification, 
-  RagChunk,
-  Scheme 
+import {
+  ApplicationRecord,
+  DigiLockerDocumentRecord,
+  LiveNotification,
+  PortalReachabilityStatus,
+  Scheme,
 } from './src/types/index.js';
+import { resolveSchemePortalUrl } from './src/utils/liveDataEngine.js';
 
 dotenv.config();
 
@@ -34,54 +29,96 @@ app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
   next(err);
 });
 
-// Pre-build RAG index of all schemes from SQLite database
+// Cache schemes from SQLite database
 let cachedSchemes: Scheme[] = dbService.getSchemes();
-let schemeRagChunks: RagChunk[] = buildSchemeChunks(cachedSchemes);
 
-function refreshRagIndex() {
+function refreshSchemesCache() {
   cachedSchemes = dbService.getSchemes();
-  schemeRagChunks = buildSchemeChunks(cachedSchemes);
 }
 
-// SSE Clients for live real-time notification stream
+// SSE Clients for genuine real-time events (zero fake timers)
 const sseClients: Response[] = [];
 
-function broadcastNotification(notification: LiveNotification) {
-  // Persist to SQLite
-  dbService.insertNotification(notification);
-
-  const data = `data: ${JSON.stringify(notification)}\n\n`;
+function pushSsePayload(payload: Record<string, unknown>) {
+  const data = `data: ${JSON.stringify(payload)}\n\n`;
   sseClients.forEach(client => {
     try {
       client.write(data);
-    } catch (err) {
+    } catch {
       // client disconnected
     }
   });
 }
 
-// Background simulator that periodically sends realistic civic events
-setInterval(() => {
-  const wards = [
-    { name: 'Ward 15 (Khajrana)', type: 'dbt_disbursed' as const, msg: 'DBT Batch credited: 120 beneficiaries received monthly financial aid in Khajrana.' },
-    { name: 'Ward 72 (Vijay Nagar)', type: 'csc_intake' as const, msg: 'MPOnline Kiosk Vijay Nagar: 8 new digital applications submitted for PMAY.' },
-    { name: 'Sanwer Janpad (Kshipra)', type: 'sanction_order' as const, msg: 'Sanwer Block: Onion-Garlic storage shed subsidy approved for 5 farmer clusters.' },
-    { name: 'Ward 45 (Palasia / 56 Dukan)', type: 'ward_verification' as const, msg: 'IMC Town Vending Committee completed biometric survey for 14 street food stalls.' },
-    { name: 'Depalpur Janpad (Betma)', type: 'dbt_disbursed' as const, msg: 'MP Kisan Kalyan ₹3,000 top-up installment released to 340 registered farmers.' },
-    { name: 'Mhow Janpad (Simrol)', type: 'application_filed' as const, msg: 'Tribal Bamboo Craft grant application registered under Ahilya Kosh.' },
-  ];
-  const pick = wards[Math.floor(Math.random() * wards.length)];
-  const newNotif: LiveNotification = {
-    id: `notif-${Date.now()}`,
-    timestamp: 'Just now',
-    type: pick.type,
-    message: pick.msg,
-    messageHindi: pick.msg,
-    wardOrBlock: pick.name,
-    amount: pick.type === 'dbt_disbursed' ? 150000 : undefined,
-  };
-  broadcastNotification(newNotif);
-}, 25000);
+function broadcastNotification(notification: LiveNotification, eventType?: string) {
+  dbService.insertNotification(notification);
+  pushSsePayload({
+    ...notification,
+    eventType: eventType || 'notification',
+  });
+}
+
+function formatNowTime(): string {
+  return new Date().toLocaleTimeString('en-IN', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+// Server-side live HTTP probe for official government portals
+async function probePortalUrl(url: string): Promise<{
+  status: PortalReachabilityStatus;
+  httpStatus: number | null;
+  latencyMs: number | null;
+  checkedAt: string;
+}> {
+  const checkedAt = new Date().toISOString();
+  const started = Date.now();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 4000);
+
+  try {
+    let response = await fetch(url, {
+      method: 'HEAD',
+      redirect: 'follow',
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'YojanaSetu-Indore-PortalCheck/1.0',
+      },
+    });
+
+    if (response.status === 405 || response.status === 403) {
+      response = await fetch(url, {
+        method: 'GET',
+        redirect: 'follow',
+        signal: controller.signal,
+        headers: {
+          'User-Agent': 'YojanaSetu-Indore-PortalCheck/1.0',
+        },
+      });
+    }
+
+    const latencyMs = Date.now() - started;
+    const isReachable = response.status >= 200 && response.status < 500;
+    return {
+      status: isReachable ? 'reachable' : 'unreachable',
+      httpStatus: response.status,
+      latencyMs,
+      checkedAt,
+    };
+  } catch (err: any) {
+    const latencyMs = Date.now() - started;
+    const isTimeout = err?.name === 'AbortError';
+    return {
+      status: isTimeout ? 'timeout' : 'unreachable',
+      httpStatus: null,
+      latencyMs,
+      checkedAt,
+    };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
 // ================= API ROUTES =================
 
@@ -92,7 +129,6 @@ app.get('/api/stream/events', (req: Request, res: Response) => {
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders();
 
-  // Send initial connected ping
   res.write(`data: ${JSON.stringify({ type: 'connected', message: 'YojanaSetu Live Stream Connected' })}\n\n`);
 
   sseClients.push(res);
@@ -103,7 +139,7 @@ app.get('/api/stream/events', (req: Request, res: Response) => {
   });
 });
 
-// District Macro Stats
+// District Macro Stats (100% real SQLite data)
 app.get('/api/stats', (_req: Request, res: Response) => {
   try {
     const stats = dbService.getDistrictStats();
@@ -111,6 +147,17 @@ app.get('/api/stats', (_req: Request, res: Response) => {
   } catch (err) {
     console.error('[API /api/stats] Error:', err);
     res.status(500).json({ error: 'Failed to load district statistics' });
+  }
+});
+
+// Ward & Janpad Live Stats
+app.get('/api/stats/wards', (_req: Request, res: Response) => {
+  try {
+    const live = dbService.getWardAndBlockLiveStats();
+    res.json(live);
+  } catch (err) {
+    console.error('[API /api/stats/wards] Error:', err);
+    res.status(500).json({ error: 'Failed to load live ward metrics' });
   }
 });
 
@@ -131,14 +178,17 @@ app.get('/api/notifications', (req: Request, res: Response) => {
 app.post('/api/notifications', (req: Request, res: Response) => {
   try {
     const { type, message, messageHindi, wardOrBlock, amount, arn } = req.body || {};
+    if (!message || !String(message).trim()) {
+      return res.status(400).json({ error: 'Broadcast message is required' });
+    }
     const parsedAmount = amount !== undefined ? Number(amount) : undefined;
     const newNotif: LiveNotification = {
       id: `notif-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      timestamp: 'Just now',
-      type: type || 'application_filed',
-      message: message || 'Administrative activity logged',
-      messageHindi: messageHindi || message || 'प्रशासनिक गतिविधि दर्ज',
-      wardOrBlock: wardOrBlock || 'Indore District',
+      timestamp: formatNowTime(),
+      type: type || 'ward_verification',
+      message: String(message).trim(),
+      messageHindi: String(messageHindi || message).trim(),
+      wardOrBlock: String(wardOrBlock || 'Indore District').trim(),
       amount: parsedAmount !== undefined && Number.isFinite(parsedAmount) ? parsedAmount : undefined,
       arn: arn || undefined,
     };
@@ -150,7 +200,62 @@ app.post('/api/notifications', (req: Request, res: Response) => {
   }
 });
 
-// ================= SCHEMES CRUD =================
+// ================= SCHEMES CRUD & REAL-TIME CHECK =================
+
+// Get Schemes Real-Time Audit Status
+app.get('/api/schemes/realtime-status', (_req: Request, res: Response) => {
+  try {
+    const report = dbService.getSchemesRealtimeStatus();
+    res.json({ report });
+  } catch (err) {
+    console.error('[API GET /api/schemes/realtime-status] Error:', err);
+    res.status(500).json({ error: 'Failed to compute real-time schemes status' });
+  }
+});
+
+// Trigger Live Server-Side Verification of Official Scheme Portals
+app.post('/api/schemes/verify-realtime', async (_req: Request, res: Response) => {
+  try {
+    const schemes = dbService.getSchemes();
+    const uniqueUrls = Array.from(new Set(schemes.map(s => resolveSchemePortalUrl(s))));
+    const urlResults = new Map<
+      string,
+      { status: PortalReachabilityStatus; httpStatus: number | null; latencyMs: number | null; checkedAt: string }
+    >();
+
+    // Probe in small parallel batches to stay responsive
+    const batchSize = 6;
+    for (let i = 0; i < uniqueUrls.length; i += batchSize) {
+      const batch = uniqueUrls.slice(i, i + batchSize);
+      const settled = await Promise.all(
+        batch.map(async url => ({ url, result: await probePortalUrl(url) }))
+      );
+      for (const item of settled) {
+        urlResults.set(item.url, item.result);
+      }
+    }
+
+    const report = dbService.updateSchemesPortalCheckByUrl(urlResults);
+    refreshSchemesCache();
+
+    broadcastNotification(
+      {
+        id: `notif-${Date.now()}`,
+        timestamp: formatNowTime(),
+        type: 'schemes_synced',
+        message: `Schemes real-time portal check completed: ${report.reachableSchemesCount}/${report.totalSchemes} schemes verified against official portals.`,
+        messageHindi: `योजना पोर्टल रीयल-टाइम जांच पूर्ण: ${report.reachableSchemesCount}/${report.totalSchemes} योजनाएं सत्यापित।`,
+        wardOrBlock: 'Indore Collectorate Catalog',
+      },
+      'schemes_updated'
+    );
+
+    res.json({ success: true, report, schemes: cachedSchemes });
+  } catch (err) {
+    console.error('[API POST /api/schemes/verify-realtime] Error:', err);
+    res.status(500).json({ error: 'Failed to execute live portal verification' });
+  }
+});
 
 // Get Schemes (with optional level and search queries)
 app.get('/api/schemes', (req: Request, res: Response) => {
@@ -179,16 +284,29 @@ app.get('/api/schemes/:id', (req: Request, res: Response) => {
   }
 });
 
-// Create/Insert Scheme
+// Create/Insert Scheme (Live Admin Broadcast)
 app.post('/api/schemes', (req: Request, res: Response) => {
   try {
     const scheme = (req.body || {}) as Scheme;
     if (!scheme.id || !scheme.title) {
       return res.status(400).json({ error: 'Invalid scheme payload. id and title required.' });
     }
-    dbService.insertScheme(scheme);
-    refreshRagIndex();
-    res.status(201).json({ success: true, scheme });
+    const saved = dbService.insertScheme(scheme, 'admin_live');
+    refreshSchemesCache();
+
+    broadcastNotification(
+      {
+        id: `notif-${Date.now()}`,
+        timestamp: formatNowTime(),
+        type: 'schemes_synced',
+        message: `Live scheme published by Indore Admin: ${saved.title} (${saved.code}).`,
+        messageHindi: `प्रशासन द्वारा नई योजना प्रकाशित: ${saved.titleHindi} (${saved.code})।`,
+        wardOrBlock: 'Indore District',
+      },
+      'schemes_updated'
+    );
+
+    res.status(201).json({ success: true, scheme: saved });
   } catch (err) {
     console.error('[API POST /api/schemes] Error:', err);
     res.status(500).json({ error: 'Failed to save scheme' });
@@ -203,9 +321,10 @@ app.put('/api/schemes/:id', (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Invalid scheme payload. title is required.' });
     }
     scheme.id = req.params.id;
-    dbService.insertScheme(scheme);
-    refreshRagIndex();
-    res.json({ success: true, scheme });
+    const saved = dbService.insertScheme(scheme, 'admin_live');
+    refreshSchemesCache();
+    pushSsePayload({ eventType: 'schemes_updated' });
+    res.json({ success: true, scheme: saved });
   } catch (err) {
     console.error('[API PUT /api/schemes/:id] Error:', err);
     res.status(500).json({ error: 'Failed to update scheme' });
@@ -219,7 +338,8 @@ app.delete('/api/schemes/:id', (req: Request, res: Response) => {
     if (!deleted) {
       return res.status(404).json({ error: 'Scheme not found or could not be deleted' });
     }
-    refreshRagIndex();
+    refreshSchemesCache();
+    pushSsePayload({ eventType: 'schemes_updated' });
     res.json({ success: true });
   } catch (err) {
     console.error('[API DELETE /api/schemes/:id] Error:', err);
@@ -278,18 +398,21 @@ app.post('/api/applications', (req: Request, res: Response) => {
       phone,
       wardOrBlock,
       areaType,
-      kioskOperatorCode,
     } = req.body || {};
 
     if (!schemeId || !applicantName || !String(applicantName).trim()) {
-      return res.status(400).json({ error: 'Missing required application fields' });
+      return res.status(400).json({ error: 'Scheme and applicant name are required' });
+    }
+    if (!samagraFamilyId || !String(samagraFamilyId).trim() || !samagraMemberId || !String(samagraMemberId).trim()) {
+      return res.status(400).json({ error: 'Samagra Family ID and Member ID are required' });
     }
 
     const cleanSchemeId = String(schemeId).trim();
     const cleanApplicantName = String(applicantName).trim();
     const scheme = dbService.getSchemeById(cleanSchemeId) || cachedSchemes.find(s => s.id === cleanSchemeId);
-    const schemeTitle = scheme ? scheme.title : 'Government Scheme Application';
-    const schemeTitleHindi = scheme ? scheme.titleHindi : 'शासकीय योजना आवेदन';
+    if (!scheme) {
+      return res.status(404).json({ error: 'Selected scheme does not exist in catalog' });
+    }
 
     let arn = `YS-IND-2026-${Math.floor(10000 + Math.random() * 90000)}`;
     let attempts = 0;
@@ -299,40 +422,40 @@ app.post('/api/applications', (req: Request, res: Response) => {
     }
 
     const today = new Date().toISOString().split('T')[0];
+    const nowTime = formatNowTime();
 
     const newApp: ApplicationRecord = {
       arn,
       schemeId: cleanSchemeId,
-      schemeTitle,
-      schemeTitleHindi,
+      schemeTitle: scheme.title,
+      schemeTitleHindi: scheme.titleHindi,
       applicantName: cleanApplicantName,
-      samagraMemberId: samagraMemberId ? String(samagraMemberId).trim() : 'N/A',
-      samagraFamilyId: samagraFamilyId ? String(samagraFamilyId).trim() : 'N/A',
-      phone: phone ? String(phone).trim() : '98XXXXXXXX',
-      wardOrBlock: wardOrBlock ? String(wardOrBlock).trim() : 'Indore Urban',
+      samagraMemberId: String(samagraMemberId).trim(),
+      samagraFamilyId: String(samagraFamilyId).trim(),
+      phone: phone ? String(phone).trim() : '',
+      wardOrBlock: wardOrBlock ? String(wardOrBlock).trim() : 'Indore District',
       areaType: areaType === 'rural' ? 'rural' : 'urban',
       appliedDate: today,
       currentStatus: 'submitted',
       officerInCharge: 'Nodal Verification Officer, Indore Collectorate',
-      sanctionAmount: scheme?.financialEntitlement?.amount || 0,
-      kioskOperatorCode: kioskOperatorCode ? String(kioskOperatorCode).trim() : undefined,
-      remarks: 'Application successfully registered in SQLite database via YojanaSetu.',
+      sanctionAmount: scheme.financialEntitlement?.amount || 0,
+      remarks: 'Application registered live via YojanaSetu Citizen Portal.',
       timeline: [
         {
           title: 'Application Intake Submitted',
           titleHindi: 'आवेदन सफलतापूर्वक दर्ज',
-          date: `${today} 11:30 AM`,
-          location: kioskOperatorCode ? `Kiosk ${kioskOperatorCode}` : 'YojanaSetu Direct Portal',
+          date: `${today} ${nowTime}`,
+          location: 'YojanaSetu Direct Portal',
           status: 'completed',
-          remarks: 'Digital acknowledgment generated. Forwarded for field verification.',
+          remarks: 'Digital acknowledgment generated. Forwarded for ward/panchayat verification.',
         },
         {
           title: 'Ward / Panchayat Field Verification',
           titleHindi: 'वार्ड / पंचायत भौतिक सत्यापन',
-          date: 'In Progress (Estimated: 2 working days)',
+          date: 'In Progress',
           location: wardOrBlock || 'Indore Ward Office',
           status: 'in_progress',
-          remarks: 'Patwari / Ward Officer biometric verification initiated.',
+          remarks: 'Queued for Nodal Ward / Janpad Officer review.',
         },
         {
           title: 'Collectorate Scrutiny & Approval',
@@ -360,16 +483,18 @@ app.post('/api/applications', (req: Request, res: Response) => {
 
     dbService.insertApplication(newApp);
 
-    // Broadcast to live stream
-    broadcastNotification({
-      id: `notif-${Date.now()}`,
-      timestamp: 'Just now',
-      type: 'application_filed',
-      message: `New application ${arn} registered for ${schemeTitle} by ${cleanApplicantName} (${newApp.wardOrBlock}).`,
-      messageHindi: `नवीन आवेदन ${arn}: ${cleanApplicantName} द्वारा ${schemeTitleHindi} हेतु दर्ज (${newApp.wardOrBlock})।`,
-      wardOrBlock: newApp.wardOrBlock || 'Indore',
-      arn,
-    });
+    broadcastNotification(
+      {
+        id: `notif-${Date.now()}`,
+        timestamp: nowTime,
+        type: 'application_filed',
+        message: `Application ${arn} filed for ${scheme.title} by ${cleanApplicantName} (${newApp.wardOrBlock}).`,
+        messageHindi: `नवीन आवेदन ${arn}: ${cleanApplicantName} द्वारा ${scheme.titleHindi} हेतु दर्ज (${newApp.wardOrBlock})।`,
+        wardOrBlock: newApp.wardOrBlock,
+        arn,
+      },
+      'application_updated'
+    );
 
     res.status(201).json({ success: true, record: newApp });
   } catch (err) {
@@ -378,12 +503,20 @@ app.post('/api/applications', (req: Request, res: Response) => {
   }
 });
 
-// Update Application Status (e.g. Approved, DBT disbursed, etc.)
+// Update Application Status (Admin live approval / disbursement)
 app.patch('/api/applications/:arn', (req: Request, res: Response) => {
   try {
     const { status, remarks } = req.body || {};
-    if (!status || typeof status !== 'string') {
-      return res.status(400).json({ error: 'Status is required' });
+    const allowedStatuses: ApplicationRecord['currentStatus'][] = [
+      'submitted',
+      'ward_verification',
+      'collectorate_scrutiny',
+      'sanction_issued',
+      'dbt_disbursed',
+      'rejected',
+    ];
+    if (!status || !allowedStatuses.includes(status)) {
+      return res.status(400).json({ error: 'Valid application status is required' });
     }
 
     const updated = dbService.updateApplicationStatus(req.params.arn, status, remarks);
@@ -391,17 +524,24 @@ app.patch('/api/applications/:arn', (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Application not found' });
     }
 
-    // Broadcast update
-    broadcastNotification({
-      id: `notif-${Date.now()}`,
-      timestamp: 'Just now',
-      type: status === 'dbt_disbursed' ? 'dbt_disbursed' : 'sanction_order',
-      message: `ARN ${updated.arn}: Status updated to ${status.toUpperCase()} for ${updated.applicantName}.`,
-      messageHindi: `आवेदन ${updated.arn}: स्थिति अद्यतित - ${status} (${updated.applicantName})।`,
-      wardOrBlock: updated.wardOrBlock,
-      amount: updated.sanctionAmount,
-      arn: updated.arn,
-    });
+    broadcastNotification(
+      {
+        id: `notif-${Date.now()}`,
+        timestamp: formatNowTime(),
+        type:
+          status === 'dbt_disbursed'
+            ? 'dbt_disbursed'
+            : status === 'ward_verification'
+            ? 'ward_verification'
+            : 'sanction_order',
+        message: `ARN ${updated.arn}: Status updated to ${status.replace('_', ' ').toUpperCase()} for ${updated.applicantName}.`,
+        messageHindi: `आवेदन ${updated.arn}: स्थिति अद्यतित - ${status} (${updated.applicantName})।`,
+        wardOrBlock: updated.wardOrBlock,
+        amount: status === 'dbt_disbursed' || status === 'sanction_issued' ? updated.sanctionAmount : undefined,
+        arn: updated.arn,
+      },
+      'application_updated'
+    );
 
     res.json({ success: true, record: updated });
   } catch (err) {
@@ -410,7 +550,18 @@ app.patch('/api/applications/:arn', (req: Request, res: Response) => {
   }
 });
 
-// ================= SAMAGRA INTEGRATION =================
+// ================= SAMAGRA LIVE INTEGRATION =================
+
+// List all live registered Samagra households
+app.get('/api/samagra', (_req: Request, res: Response) => {
+  try {
+    const families = dbService.getAllSamagraFamilies();
+    res.json({ families, count: families.length });
+  } catch (err) {
+    console.error('[API GET /api/samagra] Error:', err);
+    res.status(500).json({ error: 'Failed to list Samagra households' });
+  }
+});
 
 // Get Samagra Family Profile by Family ID or Member ID
 app.get('/api/samagra/:id', (req: Request, res: Response) => {
@@ -421,7 +572,7 @@ app.get('/api/samagra/:id', (req: Request, res: Response) => {
     }
     const family = dbService.getSamagraFamily(id);
     if (!family) {
-      return res.status(404).json({ error: 'Samagra Family or Member ID not found in database' });
+      return res.status(404).json({ error: 'Samagra Family or Member ID not found. Register a live Samagra household first.' });
     }
     res.json({ family });
   } catch (err) {
@@ -430,7 +581,7 @@ app.get('/api/samagra/:id', (req: Request, res: Response) => {
   }
 });
 
-// Register or sync a Citizen Samagra Family record
+// Register or update a live Citizen Samagra Family record
 app.post('/api/samagra/register', (req: Request, res: Response) => {
   try {
     const { familyId, headName, areaType, wardOrBlock, address, rationCardType, members } = req.body || {};
@@ -452,11 +603,69 @@ app.post('/api/samagra/register', (req: Request, res: Response) => {
       familyId: cleanFamilyId.slice(0, 16),
       headName: cleanHeadName.slice(0, 120),
       areaType: areaType === 'rural' ? 'rural' : 'urban',
-      wardOrBlock: String(wardOrBlock || 'Ward 72 (Vijay Nagar)').slice(0, 100),
+      wardOrBlock: String(wardOrBlock || 'Ward 1 (Sirpur / Chandan Nagar)').slice(0, 100),
       address: String(address || 'Indore District, Madhya Pradesh').slice(0, 300),
       rationCardType: rationCardType === 'BPL' || rationCardType === 'Antyodaya' ? rationCardType : 'APL',
       members,
     });
+
+    // Auto-issue Samagra Family & Member credentials in DigiLocker table for verified members
+    const nowIso = new Date().toISOString();
+    for (const member of saved.members) {
+      dbService.upsertDigiLockerDocument({
+        citizenKey: member.memberId,
+        docId: 'samagra_family',
+        docNumber: `SPR-FAM-${saved.familyId}`,
+        source: 'mp_edistrict',
+        issuer: 'MP Samagra Portal (SPR)',
+        verified: true,
+        verifiedAt: nowIso,
+      });
+      if (member.ekycStatus) {
+        dbService.upsertDigiLockerDocument({
+          citizenKey: member.memberId,
+          docId: 'samagra_member',
+          docNumber: `SPR-MEM-${member.memberId}`,
+          source: 'mp_edistrict',
+          issuer: 'MP Samagra Portal (SPR)',
+          verified: true,
+          verifiedAt: nowIso,
+        });
+        dbService.upsertDigiLockerDocument({
+          citizenKey: member.memberId,
+          docId: 'aadhaar',
+          docNumber: `UIDAI-EKYC-${member.memberId.slice(-4)}`,
+          source: 'digilocker',
+          issuer: 'UIDAI (eKYC Verified)',
+          verified: true,
+          verifiedAt: nowIso,
+        });
+      }
+      if (member.dbtActive) {
+        dbService.upsertDigiLockerDocument({
+          citizenKey: member.memberId,
+          docId: 'bank_dbt',
+          docNumber: `NPCI-DBT-${member.memberId.slice(-5)}`,
+          source: 'digilocker',
+          issuer: 'NPCI Aadhaar Mapper',
+          verified: true,
+          verifiedAt: nowIso,
+        });
+      }
+    }
+
+    broadcastNotification(
+      {
+        id: `notif-${Date.now()}`,
+        timestamp: formatNowTime(),
+        type: 'samagra_synced',
+        message: `Live Samagra Family ${saved.familyId} (${saved.headName}, ${saved.members.length} member${saved.members.length > 1 ? 's' : ''}) synced in ${saved.wardOrBlock}.`,
+        messageHindi: `समग्र परिवार ${saved.familyId} (${saved.headName}) ${saved.wardOrBlock} में पंजीकृत एवं सिंक हुआ।`,
+        wardOrBlock: saved.wardOrBlock,
+      },
+      'samagra_updated'
+    );
+
     res.status(201).json({ success: true, family: saved });
   } catch (err) {
     console.error('[API POST /api/samagra/register] Error:', err);
@@ -464,192 +673,193 @@ app.post('/api/samagra/register', (req: Request, res: Response) => {
   }
 });
 
-// ================= HYBRID RAG SEARCH & CITATIONS =================
-
-// Standalone RAG Retrieval API endpoint
-app.get('/api/rag/search', (req: Request, res: Response) => {
+// Toggle live Aadhaar eKYC or NPCI DBT status for a Samagra member
+app.patch('/api/samagra/:familyId/members/:memberId', (req: Request, res: Response) => {
   try {
-    const query = req.query.q ? String(req.query.q) : '';
-    const parsedTopK = req.query.topK ? Number(req.query.topK) : 4;
-    const topK = Number.isFinite(parsedTopK) && parsedTopK > 0 ? Math.min(20, Math.floor(parsedTopK)) : 4;
+    const { familyId, memberId } = req.params;
+    const { ekycStatus, dbtActive } = req.body || {};
 
-    if (!query.trim()) {
-      return res.json({ query: '', results: [] });
+    const updated = dbService.updateSamagraMemberStatus(familyId, memberId, {
+      ekycStatus: ekycStatus !== undefined ? Boolean(ekycStatus) : undefined,
+      dbtActive: dbtActive !== undefined ? Boolean(dbtActive) : undefined,
+    });
+
+    if (!updated) {
+      return res.status(404).json({ error: 'Samagra family or member not found' });
     }
 
-    const results = hybridRagSearch(query, schemeRagChunks, topK);
-    res.json({ query, results, totalIndexedChunks: schemeRagChunks.length });
+    const nowIso = new Date().toISOString();
+    if (ekycStatus === true) {
+      dbService.upsertDigiLockerDocument({
+        citizenKey: memberId,
+        docId: 'samagra_member',
+        docNumber: `SPR-MEM-${memberId}`,
+        source: 'mp_edistrict',
+        issuer: 'MP Samagra Portal (SPR)',
+        verified: true,
+        verifiedAt: nowIso,
+      });
+      dbService.upsertDigiLockerDocument({
+        citizenKey: memberId,
+        docId: 'aadhaar',
+        docNumber: `UIDAI-EKYC-${memberId.slice(-4)}`,
+        source: 'digilocker',
+        issuer: 'UIDAI (eKYC Verified)',
+        verified: true,
+        verifiedAt: nowIso,
+      });
+    }
+    if (dbtActive === true) {
+      dbService.upsertDigiLockerDocument({
+        citizenKey: memberId,
+        docId: 'bank_dbt',
+        docNumber: `NPCI-DBT-${memberId.slice(-5)}`,
+        source: 'digilocker',
+        issuer: 'NPCI Aadhaar Mapper',
+        verified: true,
+        verifiedAt: nowIso,
+      });
+    }
+
+    broadcastNotification(
+      {
+        id: `notif-${Date.now()}`,
+        timestamp: formatNowTime(),
+        type: 'samagra_synced',
+        message: `Samagra Member ${memberId} updated live (${ekycStatus !== undefined ? `eKYC: ${ekycStatus ? 'Verified' : 'Pending'}` : ''}${ekycStatus !== undefined && dbtActive !== undefined ? ', ' : ''}${dbtActive !== undefined ? `DBT: ${dbtActive ? 'Active' : 'Inactive'}` : ''}).`,
+        messageHindi: `समग्र सदस्य ${memberId} की ई-केवाईसी / डीबीटी स्थिति लाइव अद्यतित हुई।`,
+        wardOrBlock: updated.wardOrBlock,
+      },
+      'samagra_updated'
+    );
+
+    res.json({ success: true, family: updated });
   } catch (err) {
-    console.error('[API GET /api/rag/search] Error:', err);
-    res.status(500).json({ error: 'Failed to search RAG index' });
+    console.error('[API PATCH /api/samagra/:familyId/members/:memberId] Error:', err);
+    res.status(500).json({ error: 'Failed to update Samagra member status' });
   }
 });
 
-// Gemini Chatbot: Yojana Mitra with Grounded RAG Citations
-app.post('/api/gemini/chat', async (req: Request, res: Response) => {
-  const startTime = Date.now();
-  const { message, history } = req.body;
+// ================= DIGILOCKER LIVE WALLET =================
 
-  if (!message || typeof message !== 'string') {
-    return res.status(400).json({ error: 'Message is required' });
-  }
-
-  // 1. Perform Hybrid RAG Retrieval across 47 schemes (188+ chunks)
-  const retrievedChunks = hybridRagSearch(message, schemeRagChunks, 4);
-  const ragContextText = formatRagContextForPrompt(retrievedChunks);
-
-  const systemInstruction = `You are 'Yojana Mitra' (योजना मित्र), an empathetic, highly knowledgeable civic guide and AI scheme counselor for citizens of Indore District, Madhya Pradesh.
-You provide authoritative guidance on government schemes across all 6 levels of governance (International ADB/World Bank, National Central, MP State, Indore Collectorate, IMC Wards 1-85, Rural Janpads).
-
-CRITICAL GROUNDING INSTRUCTIONS:
-Always base your response on the verified government facts and rules provided in the RETRIEVED CIVIC RULES & SCHEME CONTEXT below.
-Cite the scheme name, governance level, exact entitlement amounts, eligibility conditions, and nodal office in Indore.
-
-RETRIEVED CIVIC RULES & SCHEME CONTEXT:
-${ragContextText}
-
-VERNACULAR / MALWI RECOGNITION:
-- "टापरो" / "ओसरो" = Housing / PMAY
-- "हलवा" / "खेड़ूत" = Farmer / PM-KISAN / MP Kisan Kalyan
-- "बाईजी" / "लाडली" = Women / Ladli Behna
-- "पीलो पत्तो" / "दवाई" = Ayushman Bharat / Health
-- "ठेलो" / "गुमटी" = Street Vendor / PM SVANidhi
-- "कांदा" / "लहसन" = Onion/Garlic cold storage
-
-Always give crisp, compassionate, structured answers with:
-- Scheme Name & Benefit amount
-- Who is eligible (Age, Income, Ward/Janpad)
-- Key documents needed (Aadhaar, Samagra 9-digit Member ID, Khasra B-1 for farmers, MP Domicile, Bank DBT)
-- How to apply in Indore (MPOnline / CSC Kiosk or Indore Collectorate Moti Tabela / IMC HQ Narayan Singla Marg)
-- Answer in the same language the user asked in (English, Hindi, or Malwi dialect if used). Format with markdown bullet points.`;
-
+// Fetch all verified DigiLocker documents for a Citizen (keyed by Samagra Member ID or Firebase UID)
+app.get('/api/digilocker/:citizenKey', (req: Request, res: Response) => {
   try {
-    if (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY' && !process.env.GEMINI_API_KEY.includes('MY_')) {
-      const ai = new GoogleGenAI({
-        apiKey: process.env.GEMINI_API_KEY,
-        httpOptions: {
-          headers: {
-            'User-Agent': 'aistudio-build',
-          },
-        },
-      });
-
-      // Format history if provided
-      let promptText = message;
-      if (Array.isArray(history) && history.length > 0) {
-        const historyText = history
-          .slice(-6)
-          .map((h: { sender: string; text: string }) => `${h.sender === 'user' ? 'Citizen' : 'Yojana Mitra'}: ${h.text}`)
-          .join('\n');
-        promptText = `Conversation history:\n${historyText}\n\nCitizen: ${message}\n\nYojana Mitra:`;
-      }
-
-      const geminiPromise = ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents: promptText,
-        config: {
-          systemInstruction,
-          temperature: 0.5,
-          tools: [{ googleSearch: {} }],
-        },
-      });
-
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Gemini API timeout')), 8000)
-      );
-
-      const response = await Promise.race([geminiPromise, timeoutPromise]);
-      const replyText = response.text || 'योजना मित्र: मैं आपकी सहायता के लिए सदैव उपलब्ध हूँ। कृपया योजना का नाम या अपनी पात्रता पूछें।';
-
-      // Extract Google Search Grounding Citations
-      const rawGroundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
-      const webSearchQueries = response.candidates?.[0]?.groundingMetadata?.webSearchQueries || [];
-      const webCitations: Array<{ title: string; uri: string }> = [];
-
-      if (Array.isArray(rawGroundingChunks)) {
-        for (const chunk of rawGroundingChunks) {
-          if (chunk.web && chunk.web.uri) {
-            webCitations.push({
-              title: chunk.web.title || chunk.web.uri,
-              uri: chunk.web.uri,
-            });
-          }
-        }
-      }
-
-      return res.json({
-        reply: replyText,
-        retrievedChunks,
-        webCitations,
-        webSearchQueries,
-        modelUsed: 'gemini-3.8-flash (Search Grounded)',
-        latencyMs: Date.now() - startTime,
-      });
+    const citizenKey = req.params.citizenKey?.trim();
+    if (!citizenKey) {
+      return res.status(400).json({ error: 'Citizen identifier (Samagra Member ID or UID) is required' });
     }
-  } catch (err: any) {
-    console.warn('Gemini API call or timeout, using RAG ground-truth context:', err?.message);
+    const documents = dbService.getDigiLockerDocuments(citizenKey);
+    res.json({ citizenKey, documents });
+  } catch (err) {
+    console.error('[API GET /api/digilocker/:citizenKey] Error:', err);
+    res.status(500).json({ error: 'Failed to load DigiLocker documents' });
   }
-
-  // Graceful RAG-grounded response fallback when API key is not configured or network error
-  const fallbackReply = generateLocalMitraAnswer(message, retrievedChunks, 'hi');
-
-  res.json({
-    reply: fallbackReply,
-    retrievedChunks,
-    webCitations: [],
-    webSearchQueries: [],
-    modelUsed: 'YojanaSetu Hybrid RAG Rules Engine',
-    latencyMs: Date.now() - startTime,
-  });
 });
 
-// Dedicated Google Search Grounded Endpoint for Real-Time Circulars & News
-app.post('/api/gemini/grounded-news', async (req: Request, res: Response) => {
-  const { topic } = req.body;
-  const query = topic || 'Madhya Pradesh government schemes 2026 Indore updates';
-
+// Verify / issue a live DigiLocker document
+app.post('/api/digilocker/verify', (req: Request, res: Response) => {
   try {
-    if (process.env.GEMINI_API_KEY && !process.env.GEMINI_API_KEY.includes('MY_')) {
-      const ai = new GoogleGenAI({
-        apiKey: process.env.GEMINI_API_KEY,
-        httpOptions: {
-          headers: {
-            'User-Agent': 'aistudio-build',
-          },
-        },
-      });
+    const { citizenKey, docId, docNumber, source, issuer, wardOrBlock } = req.body || {};
+    if (!citizenKey || !String(citizenKey).trim() || !docId || !String(docId).trim()) {
+      return res.status(400).json({ error: 'citizenKey and docId are required' });
+    }
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents: `Find the most recent official updates, news announcements, and deadlines for: ${query} in Indore / Madhya Pradesh. Provide concise bullet points and cite official portals.`,
-        config: {
-          tools: [{ googleSearch: {} }],
-        },
-      });
+    const cleanKey = String(citizenKey).trim();
+    const cleanDocId = String(docId).trim();
+    const generatedNum = `DL-${cleanDocId.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6)}-${cleanKey.slice(-4)}-${String(Date.now()).slice(-4)}`;
 
-      const rawChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
-      const webCitations = Array.isArray(rawChunks)
-        ? rawChunks.filter(c => c.web?.uri).map(c => ({ title: c.web?.title || c.web?.uri, uri: c.web?.uri }))
-        : [];
+    const saved: DigiLockerDocumentRecord = dbService.upsertDigiLockerDocument({
+      citizenKey: cleanKey,
+      docId: cleanDocId,
+      docNumber: docNumber && String(docNumber).trim() ? String(docNumber).trim() : generatedNum,
+      source: source === 'mp_edistrict' || source === 'manual' ? source : 'digilocker',
+      issuer: issuer ? String(issuer).trim() : 'DigiLocker / MP e-District',
+      verified: true,
+      verifiedAt: new Date().toISOString(),
+    });
 
-      return res.json({
-        summary: response.text,
-        webCitations,
-        searchQueries: response.candidates?.[0]?.groundingMetadata?.webSearchQueries || [],
+    broadcastNotification(
+      {
+        id: `notif-${Date.now()}`,
+        timestamp: formatNowTime(),
+        type: 'digilocker_verified',
+        message: `DigiLocker verified ${cleanDocId.replace(/_/g, ' ').toUpperCase()} (${saved.docNumber}) for Citizen ID ${cleanKey}.`,
+        messageHindi: `डिजिलॉकर सत्यापन पूर्ण: ${cleanDocId} (${saved.docNumber}) नागरिक आईडी ${cleanKey} हेतु।`,
+        wardOrBlock: wardOrBlock ? String(wardOrBlock) : 'Indore DigiLocker Gateway',
+      },
+      'digilocker_updated'
+    );
+
+    const documents = dbService.getDigiLockerDocuments(cleanKey);
+    res.status(201).json({ success: true, document: saved, documents });
+  } catch (err) {
+    console.error('[API POST /api/digilocker/verify] Error:', err);
+    res.status(500).json({ error: 'Failed to verify DigiLocker document' });
+  }
+});
+
+// Bulk sync multiple DigiLocker documents for a linked Samagra citizen
+app.post('/api/digilocker/sync-all', (req: Request, res: Response) => {
+  try {
+    const { citizenKey, docItems, wardOrBlock } = req.body || {};
+    if (!citizenKey || !String(citizenKey).trim() || !Array.isArray(docItems) || docItems.length === 0) {
+      return res.status(400).json({ error: 'citizenKey and non-empty docItems array are required' });
+    }
+
+    const cleanKey = String(citizenKey).trim();
+    const nowIso = new Date().toISOString();
+
+    for (const item of docItems) {
+      if (!item?.docId) continue;
+      const cleanDocId = String(item.docId).trim();
+      const docNum =
+        item.docNumber && String(item.docNumber).trim()
+          ? String(item.docNumber).trim()
+          : `DL-${cleanDocId.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6)}-${cleanKey.slice(-4)}-${String(Date.now()).slice(-4)}`;
+      dbService.upsertDigiLockerDocument({
+        citizenKey: cleanKey,
+        docId: cleanDocId,
+        docNumber: docNum,
+        source: item.source === 'mp_edistrict' || item.source === 'manual' ? item.source : 'digilocker',
+        issuer: item.issuer ? String(item.issuer) : 'DigiLocker / MP e-District',
+        verified: true,
+        verifiedAt: nowIso,
       });
     }
-  } catch (err: any) {
-    console.warn('Grounded news error:', err?.message);
-  }
 
-  res.json({
-    summary: 'ताज़ा शासकीय परिपत्र: इंदौर जिले में लाड़ली बहना, संबल 2.0, व पीएम सूर्य घर योजना के विशेष शिविर सभी 85 वार्डों एवं 4 जनपदों में आयोजित किए जा रहे हैं।',
-    webCitations: [
-      { title: 'Indore District Official Portal', uri: 'https://indore.nic.in' },
-      { title: 'MP State Citizen Portal', uri: 'https://mp.gov.in' }
-    ],
-    searchQueries: [query],
-  });
+    broadcastNotification(
+      {
+        id: `notif-${Date.now()}`,
+        timestamp: formatNowTime(),
+        type: 'digilocker_verified',
+        message: `DigiLocker Wallet synced ${docItems.length} credentials live for Citizen ID ${cleanKey}.`,
+        messageHindi: `नागरिक आईडी ${cleanKey} के ${docItems.length} दस्तावेज़ डिजिलॉकर वॉलेट में लाइव सिंक हुए।`,
+        wardOrBlock: wardOrBlock ? String(wardOrBlock) : 'Indore DigiLocker Gateway',
+      },
+      'digilocker_updated'
+    );
+
+    const documents = dbService.getDigiLockerDocuments(cleanKey);
+    res.json({ success: true, documents });
+  } catch (err) {
+    console.error('[API POST /api/digilocker/sync-all] Error:', err);
+    res.status(500).json({ error: 'Failed to bulk sync DigiLocker documents' });
+  }
+});
+
+// Revoke / remove a verified DigiLocker document
+app.delete('/api/digilocker/:citizenKey/:docId', (req: Request, res: Response) => {
+  try {
+    const { citizenKey, docId } = req.params;
+    dbService.deleteDigiLockerDocument(citizenKey, docId);
+    const documents = dbService.getDigiLockerDocuments(citizenKey);
+    pushSsePayload({ eventType: 'digilocker_updated', citizenKey });
+    res.json({ success: true, documents });
+  } catch (err) {
+    console.error('[API DELETE /api/digilocker/:citizenKey/:docId] Error:', err);
+    res.status(500).json({ error: 'Failed to revoke DigiLocker document' });
+  }
 });
 
 // Vite Development Server or Production Static Serving
@@ -670,7 +880,7 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[YojanaSetu Indore] Server listening on http://0.0.0.0:${PORT} with SQLite DB & Hybrid RAG`);
+    console.log(`[YojanaSetu Indore] Live Server listening on http://0.0.0.0:${PORT} with SQLite DB`);
   });
 }
 

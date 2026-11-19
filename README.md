@@ -12,7 +12,7 @@
 
 ## 🏛️ Executive Overview
 
-**YojanaSetu** is a production-grade civic-tech platform purpose-built for the administration and 3.5+ million residents of **Indore District, Madhya Pradesh**. Designed across **6 hierarchical tiers of governance**, it bridges the gap between complex government gazette rules and grassroots citizens using a deterministic JSON eligibility engine, vernacular Malwi/Hindi RAG AI assistance, Samagra profile integration, and live district administration dashboards.
+**YojanaSetu** is a production-grade civic-tech platform purpose-built for the administration and 3.5+ million residents of **Indore District, Madhya Pradesh**. Designed across **6 hierarchical tiers of governance**, it bridges the gap between complex government gazette rules and grassroots citizens using a deterministic JSON eligibility engine, multi-dialect Malwi/Hindi search, Samagra profile integration, and live district administration dashboards.
 
 ---
 
@@ -34,36 +34,27 @@
 - Evaluates citizen age, gender, occupation, annual family income, rural/urban residence, landholding in acres, caste category, disability percentage, and Samagra enrollment.
 - Delivers unambiguous **Eligible**, **Likely Eligible**, or **Not Eligible** verdicts with exact pass/fail requirement checklists and transparent justification.
 
-### 4. Yojana Mitra: Hybrid RAG AI Assistant
-- Server-side semantic retrieval pipeline (`/api/gemini/chat` & `/api/rag/search`) combining BM25 keyword matching, synonym expansion, and contextual re-ranking.
-- Provides grounded, hallucination-free answers citing official government nodal offices in Indore, exact financial entitlements, and required forms.
-- **Audio Read-Aloud**: Integrated Web Speech synthesis in authentic Hindi (`hi-IN`) for accessible citizen support.
-
-### 5. Official Citizen Entitlement Certificate
+### 4. Official Citizen Entitlement Certificate
 - Generates a downloadable, print-optimized **Citizen Entitlement Card** featuring:
   - Total cumulative cash DBT potential (e.g. ₹27,000/yr).
   - Capital asset & health coverage entitlement (e.g. ₹5,00,000+).
   - Unique Digital Certificate ID with dynamic verification QR code.
   - Official Indore District Administration watermark and seal.
 
-### 6. Side-by-Side Scheme Comparison Matrix
+### 5. Side-by-Side Scheme Comparison Matrix
 - Compare up to 3 schemes simultaneously across financial limits, eligibility thresholds, required documents, disbursal timelines, and local nodal grievance offices.
 
-### 7. Interactive Indore Spatial Heatmap (Wards 1–85 & Zones 1–19)
+### 6. Interactive Indore Spatial Heatmap (Wards 1–85 & Zones 1–19)
 - Real-time GIS choropleth visualization for Indore Municipal Corporation across 4 metric modes:
   - **Saturation %** (Scheme coverage against eligible target).
   - **Live Applications** submitted.
   - **DBT Disbursed (₹ Cr)**.
   - **Poverty Vulnerability Index** (High, Medium, Low).
 
-### 8. DigiLocker Document Vault & Tracker
+### 7. DigiLocker Document Vault & Tracker
 - 12 standard MP documents (Samagra Member ID, Samagra Family ID, Aadhaar, MP Domicile, Digital Income Certificate, Khasra B-1, SC/ST/OBC Digital Caste, Bank DBT, UDID, Sambal Card, etc.) with real-time verification status check.
 
-### 9. CSC Operator & Field Camp Mode
-- Bulk application processing interface for Village Level Entrepreneurs (VLEs) and Lok Seva Kendra operators.
-- Offline-ready draft queuing, instant Samagra auto-fill, and token generation.
-
-### 10. Live Admin Stream & SQLite WAL Persistence
+### 8. Live Admin Stream & SQLite WAL Persistence
 - Real-time Server-Sent Events (SSE) stream (`/api/admin/live-stream`) broadcasting applications across wards.
 - SQLite database (`./data/yojanasetu.db`) in Write-Ahead-Logging (WAL) mode for resilient, multi-process persistence.
 - One-click CSV export of district applications for MIS reporting.
@@ -82,19 +73,16 @@ yojana-setu/
 │   │   ├── AdminDashboard.tsx      # District MIS, CSV export & live SSE feed
 │   │   ├── ApplicationTrackerView.tsx # ARN status tracker with printable receipt
 │   │   ├── CitizenEntitlementCardModal.tsx # Printable entitlement certificate with QR
-│   │   ├── CscOperatorMode.tsx     # Operator high-throughput assisted intake
 │   │   ├── EligibilityCalculator.tsx # Dynamic rules engine & citizen profiler
 │   │   ├── GovernanceLevelsView.tsx # Tier-wise 6-level interactive directory
 │   │   ├── IndoreSpatialHeatmap.tsx # 19 Zones & 85 Wards interactive GIS heatmap
-│   │   ├── SchemeComparisonModal.tsx# Side-by-side scheme comparison matrix
-│   │   └── YojanaMitraChatbot.tsx  # Vernacular RAG AI chat with speech synthesis
+│   │   └── SchemeComparisonModal.tsx# Side-by-side scheme comparison matrix
 │   ├── data/
 │   │   ├── indoreGovernance.ts     # Authentic 85 IMC Wards & 4 Janpad Panchayats
 │   │   └── schemesData.ts          # 51+ exhaustive multi-tier scheme rules & benefits
 │   └── utils/
-│       ├── eligibilityEngine.ts    # Deterministic citizen qualification logic
-│       ├── ragEngine.ts            # BM25 + synonym retrieval & citation generator
-│       ├── malwiSynonyms.ts        # Malwi, Nimadi & Hindi dialect lexicon
+│       ├── rulesEngine.ts          # Deterministic citizen qualification logic
+│       ├── searchEngine.ts         # Malwi, Nimadi & Hindi dialect search engine
 │       └── *.test.ts               # Automated Node.js unit test suite
 ```
 
@@ -122,7 +110,6 @@ Copy `.env.example` to `.env`:
 ```bash
 cp .env.example .env
 ```
-*(Optional: Provide `GEMINI_API_KEY` for live Gemini generative responses; the built-in Hybrid RAG engine provides full fallback answers with citations out-of-the-box).*
 
 ### 4. Run Development Server
 ```bash
@@ -152,8 +139,7 @@ npm start
 | `POST` | `/api/applications` | Submit a citizen scheme application (generates `YS-IND-YYYY-XXXXX` ARN) |
 | `GET` | `/api/applications/:arn` | Real-time ARN query with tracking stages and verification notes |
 | `GET` | `/api/samagra/:id` | Instant lookup of 8-digit family or 9-digit member Samagra records |
-| `POST` | `/api/gemini/chat` | Yojana Mitra RAG query returning verified chunks and grounded answers |
-| `GET` | `/api/admin/live-stream` | Real-time Server-Sent Events (SSE) feed of incoming applications |
+| `GET` | `/api/stream/events` | Real-time Server-Sent Events (SSE) feed of incoming applications |
 | `GET` | `/api/admin/export-csv` | Export entire applications database as RFC-compliant CSV |
 
 ---
