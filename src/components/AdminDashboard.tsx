@@ -34,6 +34,7 @@ import {
   aggregateWardLiveMetrics,
 } from '../utils/liveDataEngine';
 import { IndoreSpatialHeatmap } from './IndoreSpatialHeatmap';
+import { ApiRequestError } from '../utils/apiClient';
 
 interface AdminDashboardProps {
   currentLanguage: SupportedLanguage;
@@ -56,7 +57,7 @@ interface AdminDashboardProps {
     message: string;
     wardOrBlock: string;
     amount?: number;
-  }) => void;
+  }) => Promise<void>;
   onFilterWardSchemes?: (wardNumber: number) => void;
 }
 
@@ -83,6 +84,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [customWard, setCustomWard] = useState('Indore Collectorate');
   const [customType, setCustomType] = useState<LiveNotification['type']>('ward_verification');
   const [isExporting, setIsExporting] = useState(false);
+  const [isBroadcasting, setIsBroadcasting] = useState(false);
   const [updatingArn, setUpdatingArn] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('all');
 
@@ -97,6 +99,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [newSchemePortalUrl, setNewSchemePortalUrl] = useState('https://indore.nic.in/');
   const [isSavingScheme, setIsSavingScheme] = useState(false);
   const [adminFeedback, setAdminFeedback] = useState<string | null>(null);
+  const [adminError, setAdminError] = useState<{ message: string; details?: string } | null>(null);
 
   const wardMetrics = useMemo(
     () => aggregateWardLiveMetrics(applications, samagraFamilies, IMC_WARDS),
@@ -120,16 +123,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     return applications.filter(a => a.currentStatus === statusFilter);
   }, [applications, statusFilter]);
 
-  const handleBroadcast = (e: React.FormEvent) => {
+  const handleBroadcast = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!customMsg.trim()) return;
+    if (isBroadcasting) return;
+    setAdminError(null);
+    setAdminFeedback(null);
 
-    onBroadcastNotification({
-      type: customType,
-      message: customMsg.trim(),
-      wardOrBlock: customWard,
-    });
-    setCustomMsg('');
+    if (!customMsg.trim()) {
+      setAdminError({ message: 'Please enter a non-empty official broadcast message.' });
+      return;
+    }
+
+    setIsBroadcasting(true);
+    try {
+      await onBroadcastNotification({
+        type: customType,
+        message: customMsg.trim(),
+        wardOrBlock: customWard.trim() || 'Indore Collectorate',
+      });
+      setCustomMsg('');
+      setAdminFeedback(`Live alert broadcasted to ${customWard.trim() || 'Indore Collectorate'}.`);
+    } catch (err) {
+      setAdminError({
+        message: err instanceof Error ? err.message : 'Failed to broadcast alert.',
+        details: err instanceof ApiRequestError ? err.details : undefined,
+      });
+    } finally {
+      setIsBroadcasting(false);
+    }
   };
 
   const handleAdvanceStatus = async (
@@ -137,11 +158,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     nextStatus: ApplicationRecord['currentStatus'],
     remarks: string
   ) => {
+    if (updatingArn) return;
     setUpdatingArn(arn);
     setAdminFeedback(null);
+    setAdminError(null);
     try {
       await onUpdateApplicationStatus(arn, nextStatus, remarks);
       setAdminFeedback(`Application ${arn} updated live to ${nextStatus.replace(/_/g, ' ').toUpperCase()}.`);
+    } catch (err) {
+      setAdminError({
+        message: err instanceof Error ? err.message : `Failed to update application ${arn}.`,
+        details: err instanceof ApiRequestError ? err.details : undefined,
+      });
     } finally {
       setUpdatingArn(null);
     }
@@ -149,9 +177,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const handlePublishLiveScheme = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newSchemeTitle.trim()) return;
-    setIsSavingScheme(true);
+    if (isSavingScheme) return;
+    setAdminError(null);
     setAdminFeedback(null);
+
+    if (!newSchemeTitle.trim()) {
+      setAdminError({ message: 'Scheme title (English) is required.' });
+      return;
+    }
+    setIsSavingScheme(true);
     try {
       const slug = `live_${newSchemeTitle
         .trim()
@@ -189,12 +223,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         cscAvailable: false,
       });
       if (ok) {
-        setAdminFeedback(`Live scheme "${newSchemeTitle.trim()}" published to SQLite & pushed in real time to Citizen Discovery.`);
+        setAdminFeedback(`Live scheme "${newSchemeTitle.trim()}" published to database & pushed in real time to Citizen Discovery.`);
         setNewSchemeTitle('');
         setNewSchemeTitleHi('');
         setNewSchemeBenefits('');
         setShowAddScheme(false);
       }
+    } catch (err) {
+      setAdminError({
+        message: err instanceof Error ? err.message : 'Failed to publish live scheme.',
+        details: err instanceof ApiRequestError ? err.details : undefined,
+      });
     } finally {
       setIsSavingScheme(false);
     }
@@ -202,6 +241,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const handleExportCSV = async () => {
     setIsExporting(true);
+    setAdminError(null);
     try {
       const headers = [
         'ARN',
@@ -242,7 +282,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       link.click();
       document.body.removeChild(link);
     } catch (err) {
-      console.error('CSV export failed:', err);
+      setAdminError({
+        message: 'Failed to export CSV file.',
+        details: err instanceof Error ? err.message : undefined,
+      });
     } finally {
       setIsExporting(false);
     }
@@ -303,13 +346,37 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       </div>
 
+      {adminError && (
+        <div
+          role="alert"
+          className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-900 text-xs flex items-start justify-between gap-2"
+        >
+          <div className="flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+            <div>
+              <div className="font-bold">{adminError.message}</div>
+              {adminError.details && (
+                <div className="text-[11px] text-rose-700 mt-0.5">{adminError.details}</div>
+              )}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setAdminError(null)}
+            className="text-rose-700 font-bold cursor-pointer"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {adminFeedback && (
         <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-semibold flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
             <span>{adminFeedback}</span>
           </div>
-          <button type="button" onClick={() => setAdminFeedback(null)} className="text-emerald-700 font-bold">
+          <button type="button" onClick={() => setAdminFeedback(null)} className="text-emerald-700 font-bold cursor-pointer">
             ✕
           </button>
         </div>
@@ -649,10 +716,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
                 <button
                   type="submit"
-                  className="w-full py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1 cursor-pointer"
+                  disabled={isBroadcasting}
+                  className="w-full py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-60 text-white rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1 cursor-pointer"
                 >
-                  <Send className="w-3.5 h-3.5" />
-                  <span>Broadcast Live Alert</span>
+                  {isBroadcasting ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Send className="w-3.5 h-3.5" />
+                  )}
+                  <span>{isBroadcasting ? 'Broadcasting...' : 'Broadcast Live Alert'}</span>
                 </button>
               </form>
             </div>

@@ -66,6 +66,9 @@ export interface UserProfileDoc {
   displayName: string;
   photoURL?: string;
   phone?: string;
+  mobileNumber?: string;
+  mobileVerified?: boolean;
+  mobileVerificationToken?: string;
   role: 'citizen' | 'admin';
   authMethod?: AuthMethod;
   samagraId?: string;
@@ -581,6 +584,7 @@ export function mapUserProfileToCitizenProfile(docData: UserProfileDoc, prev: Ci
     maritalStatus: docData.maritalStatus || prev.maritalStatus,
     isMpDomicile: docData.isMpDomicile ?? prev.isMpDomicile,
     isIndoreResident: docData.isIndoreResident ?? prev.isIndoreResident,
+    phone: docData.mobileNumber || docData.phone || prev.phone,
     samagraFamilyId: docData.samagraFamilyId || prev.samagraFamilyId,
     samagraMemberId: docData.samagraMemberId || prev.samagraMemberId,
     verifiedDocuments: {

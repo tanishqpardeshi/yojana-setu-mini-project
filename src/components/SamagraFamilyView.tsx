@@ -14,6 +14,7 @@ import {
   Loader2,
   UserPlus,
   RefreshCw,
+  ExternalLink,
 } from 'lucide-react';
 import {
   SamagraFamily,
@@ -29,6 +30,14 @@ import {
 } from '../types';
 import { IMC_WARDS, JANPAD_BLOCKS } from '../data/indoreGovernance';
 import { rankSchemesForCitizen } from '../utils/rulesEngine';
+import { ToastItem } from './ToastContainer';
+import { parseApiResponse } from '../utils/apiClient';
+import {
+  SAMAGRA_PORTAL_URL,
+  validateSamagraFamilyId,
+  validateSamagraLookupId,
+  validateSamagraMemberId,
+} from '../utils/samagraValidator';
 
 interface SamagraFamilyViewProps {
   currentLanguage: SupportedLanguage;
@@ -37,6 +46,7 @@ interface SamagraFamilyViewProps {
   activeMemberId?: string;
   onSelectMemberForProfile: (member: FamilyMember, family: SamagraFamily) => void;
   onFamiliesChanged?: () => void;
+  onNotify?: (toast: Omit<ToastItem, 'id'>) => void;
 }
 
 const OCCUPATIONS: OccupationType[] = [
@@ -80,14 +90,6 @@ function rememberSamagraFamilyId(familyId: string) {
   }
 }
 
-function generateSamagraFamilyId(): string {
-  return String(Math.floor(40000000 + Math.random() * 59999999));
-}
-
-function generateSamagraMemberId(): string {
-  return String(Math.floor(100000000 + Math.random() * 899999999));
-}
-
 interface DraftMember {
   memberId: string;
   name: string;
@@ -106,7 +108,7 @@ interface DraftMember {
 
 function createEmptyDraftMember(isHead: boolean): DraftMember {
   return {
-    memberId: generateSamagraMemberId(),
+    memberId: '',
     name: '',
     relation: isHead ? 'Self / Head' : 'Spouse',
     age: isHead ? 35 : 30,
@@ -117,8 +119,8 @@ function createEmptyDraftMember(isHead: boolean): DraftMember {
     landHoldingHectares: 0,
     maritalStatus: 'Married',
     hasDisability: false,
-    ekycStatus: true,
-    dbtActive: true,
+    ekycStatus: false,
+    dbtActive: false,
   };
 }
 
@@ -129,6 +131,7 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
   activeMemberId,
   onSelectMemberForProfile,
   onFamiliesChanged,
+  onNotify,
 }) => {
   const [searchId, setSearchId] = useState(activeFamilyId || '');
   const [registeredFamilies, setRegisteredFamilies] = useState<SamagraFamily[]>([]);
@@ -137,11 +140,20 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
   const [searching, setSearching] = useState(false);
   const [updatingMemberId, setUpdatingMemberId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [errorDetails, setErrorDetails] = useState<string | null>(null);
+  const [samagraPortalFallback, setSamagraPortalFallback] = useState<{
+    searchedId: string;
+    kind: 'family' | 'member' | null;
+    error: string;
+    details?: string;
+    portalUrl?: string;
+    allowManualEntry?: boolean;
+  } | null>(null);
   const [statusBanner, setStatusBanner] = useState<string | null>(null);
   const [showRegisterForm, setShowRegisterForm] = useState(false);
 
   // Registration Form State
-  const [regFamilyId, setRegFamilyId] = useState(() => generateSamagraFamilyId());
+  const [regFamilyId, setRegFamilyId] = useState('');
   const [regAreaType, setRegAreaType] = useState<AreaType>('urban');
   const [regWardNumber, setRegWardNumber] = useState<number>(72);
   const [regBlockName, setRegBlockName] = useState<JanpadBlock>('Depalpur');
@@ -212,35 +224,84 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (searching) return;
     setErrorMsg(null);
+    setErrorDetails(null);
+    setSamagraPortalFallback(null);
     setStatusBanner(null);
-    const cleaned = searchId.trim();
-    if (!cleaned) {
-      setErrorMsg('Enter an 8-digit Samagra Family ID or 9-digit Member ID to fetch live records.');
+
+    const validation = validateSamagraLookupId(searchId);
+    if (!validation.valid) {
+      setErrorMsg(
+        validation.error ||
+          'Enter an 8-digit Samagra Family ID or 9-digit Member ID (numeric digits only).'
+      );
       return;
     }
 
     setSearching(true);
     try {
-      const res = await fetch(`/api/samagra/${encodeURIComponent(cleaned)}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.family) {
-          const fam = data.family as SamagraFamily;
-          rememberSamagraFamilyId(fam.familyId);
-          setSelectedFamily(fam);
-          setRegisteredFamilies(prev => [fam, ...prev.filter(f => f.familyId !== fam.familyId)]);
-          setShowRegisterForm(false);
-          setStatusBanner(`Fetched live Samagra record for Family ID ${fam.familyId}.`);
-          return;
-        }
+      const res = await fetch(`/api/samagra/${encodeURIComponent(validation.cleaned)}`);
+      const parsed = await parseApiResponse<{
+        family?: SamagraFamily;
+        source?: string;
+        liveConfigured?: boolean;
+        notice?: string;
+      }>(res);
+
+      if (parsed.ok && parsed.data?.family) {
+        const fam = parsed.data.family;
+        rememberSamagraFamilyId(fam.familyId);
+        setSelectedFamily(fam);
+        setRegisteredFamilies(prev => [fam, ...prev.filter(f => f.familyId !== fam.familyId)]);
+        setShowRegisterForm(false);
+        const sourceNote =
+          parsed.data.liveConfigured === false && parsed.data.notice
+            ? ` (${parsed.data.notice})`
+            : '';
+        const successText = `Fetched verified Samagra record for Family ID ${fam.familyId}${sourceNote}`;
+        setStatusBanner(successText);
+        onNotify?.({
+          type: 'success',
+          title: 'Samagra Record Loaded',
+          message: `Family ID ${fam.familyId} loaded successfully.`,
+        });
+        return;
       }
+
+      const errInfo = parsed.errorInfo || {
+        status: parsed.status,
+        error: `No verified Samagra record found for "${validation.cleaned}".`,
+        portalUrl: SAMAGRA_PORTAL_URL,
+        allowManualEntry: true,
+      };
       setSelectedFamily(null);
-      setErrorMsg(
-        `No live Samagra record found for "${cleaned}". Register this household below to simulate live Samagra & DigiLocker sync.`
-      );
+      setErrorMsg(errInfo.error);
+      setErrorDetails(errInfo.details || null);
+      setSamagraPortalFallback({
+        searchedId: validation.cleaned,
+        kind: validation.kind,
+        error: errInfo.error,
+        details: errInfo.details,
+        portalUrl: errInfo.portalUrl || SAMAGRA_PORTAL_URL,
+        allowManualEntry: errInfo.allowManualEntry ?? true,
+      });
+      onNotify?.({
+        type: 'warning',
+        title: 'Samagra Portal Lookup',
+        message: errInfo.error,
+        details: errInfo.details,
+        actionUrl: errInfo.portalUrl || SAMAGRA_PORTAL_URL,
+        actionLabel: 'Open samagra.gov.in',
+      });
     } catch {
-      setErrorMsg('Unable to reach live Samagra API endpoint. Please verify server connectivity.');
+      const msg = 'Unable to reach live Samagra API endpoint. Please verify server connectivity.';
+      setErrorMsg(msg);
+      onNotify?.({
+        type: 'error',
+        title: 'Network Error',
+        message: msg,
+      });
     } finally {
       setSearching(false);
     }
@@ -248,12 +309,15 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
 
   const handleRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSavingFamily) return;
     setErrorMsg(null);
+    setErrorDetails(null);
+    setSamagraPortalFallback(null);
     setStatusBanner(null);
 
-    const cleanFamId = regFamilyId.trim();
-    if (!/^\d{8}$/.test(cleanFamId)) {
-      setErrorMsg('Samagra Family ID must be exactly 8 numeric digits.');
+    const famValidation = validateSamagraFamilyId(regFamilyId);
+    if (!famValidation.valid) {
+      setErrorMsg(famValidation.error || 'Samagra Family ID must be exactly 8 numeric digits.');
       return;
     }
 
@@ -263,15 +327,24 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
       return;
     }
 
+    const seenMemberIds = new Set<string>();
     for (const m of draftMembers) {
       if (!m.name.trim()) {
         setErrorMsg('Every household member must have a full name.');
         return;
       }
-      if (!/^\d{9}$/.test(m.memberId.trim())) {
-        setErrorMsg(`Member "${m.name}" must have a valid 9-digit Samagra Member ID.`);
+      const memValidation = validateSamagraMemberId(m.memberId);
+      if (!memValidation.valid) {
+        setErrorMsg(`Member "${m.name}": ${memValidation.error}`);
         return;
       }
+      if (seenMemberIds.has(memValidation.cleaned)) {
+        setErrorMsg(
+          `Duplicate 9-digit Samagra Member ID "${memValidation.cleaned}" detected in this form. Each family member must have a unique ID.`
+        );
+        return;
+      }
+      seenMemberIds.add(memValidation.cleaned);
     }
 
     const selectedWardInfo = IMC_WARDS.find(w => w.number === regWardNumber);
@@ -281,7 +354,7 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
         : `${regBlockName} Janpad Panchayat`;
 
     const payload: SamagraFamily = {
-      familyId: cleanFamId,
+      familyId: famValidation.cleaned,
       headName: headMember.name.trim(),
       areaType: regAreaType,
       wardOrBlock,
@@ -318,26 +391,48 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
         body: JSON.stringify(payload),
       });
 
-      const data = await res.json();
-      if (!res.ok || !data?.family) {
-        setErrorMsg(data?.error || 'Could not register Samagra household.');
+      const parsed = await parseApiResponse<{ family?: SamagraFamily }>(res);
+      if (!parsed.ok || !parsed.data?.family) {
+        const errInfo = parsed.errorInfo || {
+          status: parsed.status,
+          error: 'Could not register Samagra household.',
+        };
+        setErrorMsg(errInfo.error);
+        setErrorDetails(errInfo.details || null);
+        onNotify?.({
+          type: 'error',
+          title: parsed.status === 409 ? 'Duplicate Samagra ID' : 'Samagra Registration Failed',
+          message: errInfo.error,
+          details: errInfo.details,
+        });
         return;
       }
 
-      rememberSamagraFamilyId(data.family.familyId);
-      setSelectedFamily(data.family);
-      setSearchId(data.family.familyId);
+      const registeredFamily = parsed.data.family;
+      rememberSamagraFamilyId(registeredFamily.familyId);
+      setSelectedFamily(registeredFamily);
+      setSearchId(registeredFamily.familyId);
       setShowRegisterForm(false);
-      setStatusBanner(
-        `Registered live Samagra Family ID ${data.family.familyId} (${data.family.members.length} member${data.family.members.length > 1 ? 's' : ''}) and synced initial eKYC/DBT credentials to DigiLocker Wallet.`
-      );
-      setRegFamilyId(generateSamagraFamilyId());
+      const bannerMsg = `Registered Samagra Family ID ${registeredFamily.familyId} (${registeredFamily.members.length} member${registeredFamily.members.length > 1 ? 's' : ''}) in the database.`;
+      setStatusBanner(bannerMsg);
+      onNotify?.({
+        type: 'success',
+        title: 'Household Registered',
+        message: `Samagra Family ID ${registeredFamily.familyId} saved.`,
+      });
+      setRegFamilyId('');
       setRegAddress('');
       setDraftMembers([createEmptyDraftMember(true)]);
-      await loadRegisteredFamilies(data.family.familyId);
+      await loadRegisteredFamilies(registeredFamily.familyId);
       onFamiliesChanged?.();
     } catch {
-      setErrorMsg('Network error while registering live Samagra household.');
+      const msg = 'Network error while registering live Samagra household.';
+      setErrorMsg(msg);
+      onNotify?.({
+        type: 'error',
+        title: 'Network Error',
+        message: msg,
+      });
     } finally {
       setIsSavingFamily(false);
     }
@@ -348,8 +443,10 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
     member: FamilyMember,
     field: 'ekycStatus' | 'dbtActive'
   ) => {
+    if (updatingMemberId) return;
     setUpdatingMemberId(member.memberId);
     setErrorMsg(null);
+    setErrorDetails(null);
     try {
       const nextVal = !member[field];
       const res = await fetch(
@@ -360,27 +457,47 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
           body: JSON.stringify({ [field]: nextVal }),
         }
       );
-      const data = await res.json();
-      if (res.ok && data?.family) {
-        setSelectedFamily(data.family);
-        setRegisteredFamilies(prev =>
-          prev.map(f => (f.familyId === data.family.familyId ? data.family : f))
-        );
-        setStatusBanner(
-          `Updated ${member.name} (${member.memberId}): ${
-            field === 'ekycStatus'
-              ? nextVal
-                ? 'Aadhaar eKYC Verified & synced to DigiLocker'
-                : 'Aadhaar eKYC marked Pending'
-              : nextVal
-              ? 'NPCI Bank DBT Activated & synced to DigiLocker'
-              : 'NPCI Bank DBT marked Inactive'
-          }.`
-        );
-        onFamiliesChanged?.();
+      const parsed = await parseApiResponse<{ family?: SamagraFamily }>(res);
+      if (!parsed.ok || !parsed.data?.family) {
+        const errInfo = parsed.errorInfo || {
+          status: parsed.status,
+          error: 'Could not update member eKYC/DBT status.',
+        };
+        setErrorMsg(errInfo.error);
+        setErrorDetails(errInfo.details || null);
+        onNotify?.({
+          type: 'error',
+          title: 'Verification Update Failed',
+          message: errInfo.error,
+          details: errInfo.details,
+        });
+        return;
       }
+
+      const updatedFamily = parsed.data.family;
+      setSelectedFamily(updatedFamily);
+      setRegisteredFamilies(prev =>
+        prev.map(f => (f.familyId === updatedFamily.familyId ? updatedFamily : f))
+      );
+      const statusText = `Updated ${member.name} (${member.memberId}): ${
+        field === 'ekycStatus'
+          ? nextVal
+            ? 'Aadhaar eKYC marked Verified'
+            : 'Aadhaar eKYC marked Pending'
+          : nextVal
+          ? 'NPCI Bank DBT marked Active'
+          : 'NPCI Bank DBT marked Inactive'
+      }.`;
+      setStatusBanner(statusText);
+      onFamiliesChanged?.();
     } catch {
-      setErrorMsg('Could not update member eKYC/DBT status.');
+      const msg = 'Could not update member eKYC/DBT status due to a network error.';
+      setErrorMsg(msg);
+      onNotify?.({
+        type: 'error',
+        title: 'Network Error',
+        message: msg,
+      });
     } finally {
       setUpdatingMemberId(null);
     }
@@ -436,7 +553,7 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
           <div className="flex items-center space-x-2">
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
             <span className="text-xs font-bold text-emerald-800 uppercase tracking-wider bg-emerald-100 px-2 py-0.5 rounded">
-              Live Samagra ID Integration • Real-Time SQLite Registry
+              Live Samagra Portal Registry
             </span>
           </div>
           <h2 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight mt-1 font-heading">
@@ -447,7 +564,7 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
               : 'Live Samagra Family ID Portal & Household Sync'}
           </h2>
           <p className="text-sm text-slate-500">
-            Search an existing Samagra Family/Member ID or register a live household below to auto-sync Aadhaar eKYC, NPCI DBT, and DigiLocker Wallet eligibility.
+            Search your official Samagra Family/Member ID or register your verified household below for eligibility matching. Connect Official DigiLocker separately to verify government certificates.
           </p>
         </div>
 
@@ -465,6 +582,8 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
             onClick={() => {
               setShowRegisterForm(prev => !prev);
               setErrorMsg(null);
+              setErrorDetails(null);
+              setSamagraPortalFallback(null);
             }}
             className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-xs transition cursor-pointer"
           >
@@ -481,21 +600,73 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
             <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
             <span>{statusBanner}</span>
           </div>
-          <button type="button" onClick={() => setStatusBanner(null)} className="text-emerald-700 hover:text-emerald-950 font-bold">
+          <button type="button" onClick={() => setStatusBanner(null)} className="text-emerald-700 hover:text-emerald-950 font-bold cursor-pointer">
             ✕
           </button>
         </div>
       )}
 
       {errorMsg && (
-        <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-            <span>{errorMsg}</span>
+        <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-900 text-xs space-y-2.5" role="alert">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-start gap-2.5">
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p className="font-bold">{errorMsg}</p>
+                {errorDetails && (
+                  <p className="text-rose-700 font-normal leading-relaxed">{errorDetails}</p>
+                )}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setErrorMsg(null);
+                setErrorDetails(null);
+                setSamagraPortalFallback(null);
+              }}
+              className="text-rose-700 hover:text-rose-950 font-bold cursor-pointer"
+            >
+              ✕
+            </button>
           </div>
-          <button type="button" onClick={() => setErrorMsg(null)} className="text-rose-700 hover:text-rose-950 font-bold">
-            ✕
-          </button>
+          {samagraPortalFallback && (
+            <div className="flex flex-wrap items-center gap-3 pl-6 pt-1">
+              <a
+                href={samagraPortalFallback.portalUrl || SAMAGRA_PORTAL_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-rose-300 text-rose-900 font-bold hover:bg-rose-100 transition"
+              >
+                <span>Open Official Portal (samagra.gov.in)</span>
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+              {samagraPortalFallback.allowManualEntry !== false && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (samagraPortalFallback.kind === 'family' && samagraPortalFallback.searchedId) {
+                      setRegFamilyId(samagraPortalFallback.searchedId);
+                    } else if (samagraPortalFallback.kind === 'member' && samagraPortalFallback.searchedId) {
+                      setDraftMembers(prev =>
+                        prev.map((m, i) =>
+                          i === 0 ? { ...m, memberId: samagraPortalFallback.searchedId } : m
+                        )
+                      );
+                    }
+                    setShowRegisterForm(true);
+                    setErrorMsg(null);
+                    setErrorDetails(null);
+                    setSamagraPortalFallback(null);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold transition cursor-pointer"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>Enter &amp; Verify Household Manually</span>
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -546,6 +717,8 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
                     setSearchId(fam.familyId);
                     setSelectedFamily(fam);
                     setErrorMsg(null);
+                    setErrorDetails(null);
+                    setSamagraPortalFallback(null);
                     setShowRegisterForm(false);
                   }}
                   className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition cursor-pointer ${
@@ -571,19 +744,21 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
           <div className="flex flex-wrap items-center justify-between gap-2 pb-4 border-b border-slate-100">
             <div>
               <span className="text-[11px] font-bold uppercase tracking-wider text-amber-800 bg-amber-100 px-2 py-0.5 rounded">
-                Live Samagra Family Registration
+                Samagra Family Registration
               </span>
               <h3 className="text-lg font-black text-slate-900 mt-1">
-                Create Real-Time Household & Sync to DigiLocker
+                Enter Official Household Details from Samagra Portal
               </h3>
             </div>
-            <button
-              type="button"
-              onClick={() => setRegFamilyId(generateSamagraFamilyId())}
-              className="text-xs font-bold text-amber-700 hover:text-amber-900 underline cursor-pointer"
+            <a
+              href={SAMAGRA_PORTAL_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs font-bold text-amber-700 hover:text-amber-900 inline-flex items-center gap-1 underline"
             >
-              Generate Fresh 8-Digit Family ID
-            </button>
+              <span>Check ID on samagra.gov.in</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
           </div>
 
           {/* Household Metadata */}
@@ -597,7 +772,7 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
                 value={regFamilyId}
                 onChange={e => setRegFamilyId(e.target.value.replace(/\D/g, '').slice(0, 8))}
                 required
-                placeholder="e.g. 52910483"
+                placeholder="Enter 8-digit Family ID"
                 className="w-full px-3 py-2 text-xs font-mono font-bold border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-amber-500"
               />
             </div>
@@ -745,6 +920,7 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
                       <input
                         type="text"
                         required
+                        placeholder="Enter 9-digit Member ID"
                         value={member.memberId}
                         onChange={e =>
                           setDraftMembers(prev =>
@@ -997,7 +1173,7 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
               ) : (
                 <ShieldCheck className="w-4 h-4" />
               )}
-              <span>Save Live Samagra Family & Sync Wallet</span>
+              <span>Save Samagra Household</span>
             </button>
           </div>
         </form>

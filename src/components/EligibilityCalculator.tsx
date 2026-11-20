@@ -28,7 +28,7 @@ import {
   OccupationType,
   MaritalStatus,
 } from '../types';
-import { IMC_WARDS, JANPAD_BLOCKS, GOVERNANCE_LEVEL_NAMES, STANDARD_DOCUMENTS } from '../data/indoreGovernance';
+import { IMC_WARDS, JANPAD_BLOCKS, GOVERNANCE_LEVEL_NAMES } from '../data/indoreGovernance';
 import { rankSchemesForCitizen } from '../utils/rulesEngine';
 import { resolveSchemePortalUrl } from '../utils/liveDataEngine';
 
@@ -55,7 +55,6 @@ interface EligibilityCalculatorProps {
   profile: CitizenProfile;
   setProfile: React.Dispatch<React.SetStateAction<CitizenProfile>>;
   citizenKey: string | null;
-  onQuickVerifyDocument: (docId: string, issuer: string) => Promise<boolean>;
   onApplyScheme: (scheme: Scheme, profile: CitizenProfile) => void;
   onNavigateToDigilocker: () => void;
   onNavigateToSamagra: () => void;
@@ -71,8 +70,6 @@ export const EligibilityCalculator: React.FC<EligibilityCalculatorProps> = ({
   currentLanguage,
   profile,
   setProfile,
-  citizenKey,
-  onQuickVerifyDocument,
   onApplyScheme,
   onNavigateToDigilocker,
   onNavigateToSamagra,
@@ -84,28 +81,15 @@ export const EligibilityCalculator: React.FC<EligibilityCalculatorProps> = ({
 }) => {
   const [filterTab, setFilterTab] = useState<'all' | 'eligible' | 'likely' | 'not_eligible'>('all');
   const [selectedSchemeDetail, setSelectedSchemeDetail] = useState<SchemeEligibilityResult | null>(null);
-  const [resolvedDocToast, setResolvedDocToast] = useState<string | null>(null);
-  const [verifyingDocId, setVerifyingDocId] = useState<string | null>(null);
+  const [resolvedDocToast, setResolvedDocToast] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const handleQuickVerifyDoc = async (docId: string) => {
-    if (!citizenKey) {
-      setResolvedDocToast('Link or register a live Samagra ID first so DigiLocker documents persist to your wallet.');
-      onNavigateToDigilocker();
-      return;
-    }
-
+  const handleOpenDigiLockerForDoc = (docId: string) => {
     const meta = DOCUMENT_NAMES[docId] || { en: docId, hi: docId };
-    const std = STANDARD_DOCUMENTS.find(d => d.id === docId);
-    setVerifyingDocId(docId);
-    try {
-      const ok = await onQuickVerifyDocument(docId, std?.issuingAuthority || 'DigiLocker India');
-      if (ok) {
-        setResolvedDocToast(`${meta.en} (${meta.hi}) verified & persisted in live DigiLocker Wallet. Eligibility updated.`);
-        setTimeout(() => setResolvedDocToast(null), 4000);
-      }
-    } finally {
-      setVerifyingDocId(null);
-    }
+    setResolvedDocToast({
+      type: 'success',
+      text: `Connect Official DigiLocker to verify ${meta.en} (${meta.hi}).`,
+    });
+    onNavigateToDigilocker();
   };
 
   // Real-time evaluation of all schemes
@@ -162,7 +146,7 @@ export const EligibilityCalculator: React.FC<EligibilityCalculatorProps> = ({
             </div>
             <p className="text-xs text-slate-500">
               {schemesRealtimeReport?.verdictDetail ||
-                'Schemes are synced from the live SQLite database. Click below to verify official government portals right now.'}
+                'Schemes are synced from the live database. Click below to verify official government portals right now.'}
             </p>
           </div>
         </div>
@@ -588,15 +572,23 @@ export const EligibilityCalculator: React.FC<EligibilityCalculatorProps> = ({
         {/* RIGHT COLUMN: Scheme Results Cards (8 cols on lg) */}
         <div className="lg:col-span-8 space-y-4">
           {resolvedDocToast && (
-            <div className="p-3 bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center justify-between shadow-md animate-fade-in">
+            <div
+              role={resolvedDocToast.type === 'error' ? 'alert' : 'status'}
+              className={`p-3 rounded-xl text-xs font-bold flex items-center justify-between shadow-md animate-fade-in ${
+                resolvedDocToast.type === 'error'
+                  ? 'bg-rose-600 text-white'
+                  : 'bg-emerald-600 text-white'
+              }`}
+            >
               <div className="flex items-center space-x-2">
                 <Check className="w-4 h-4 shrink-0 bg-white/20 p-0.5 rounded-full" />
-                <span>{resolvedDocToast}</span>
+                <span>{resolvedDocToast.text}</span>
               </div>
               <button
                 type="button"
                 onClick={() => setResolvedDocToast(null)}
-                className="text-white/80 hover:text-white font-bold ml-2 text-sm"
+                aria-label="Dismiss notification"
+                className="text-white/80 hover:text-white font-bold ml-2 text-sm cursor-pointer"
               >
                 ✕
               </button>
@@ -742,7 +734,7 @@ export const EligibilityCalculator: React.FC<EligibilityCalculatorProps> = ({
                           </button>
                         </div>
 
-                        {/* Interactive Clickable Badges with English & Hindi */}
+                        {/* Interactive Clickable Badges linking to Official DigiLocker OAuth */}
                         <div className="flex flex-wrap gap-1.5 pt-0.5">
                           {missingDocuments.map(docId => {
                             const docMeta = DOCUMENT_NAMES[docId] || { en: docId, hi: docId };
@@ -750,15 +742,15 @@ export const EligibilityCalculator: React.FC<EligibilityCalculatorProps> = ({
                               <button
                                 key={docId}
                                 type="button"
-                                onClick={() => handleQuickVerifyDoc(docId)}
-                                className="group inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-white hover:bg-emerald-50 text-slate-800 hover:text-emerald-800 border border-amber-300 hover:border-emerald-400 shadow-2xs transition cursor-pointer"
-                                title={`Click to verify ${docMeta.en} (${docMeta.hi}) in DigiLocker to upgrade scheme to 100% Eligible`}
+                                onClick={() => handleOpenDigiLockerForDoc(docId)}
+                                className="group inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-white hover:bg-blue-50 text-slate-800 hover:text-blue-900 border border-amber-300 hover:border-blue-400 shadow-2xs transition cursor-pointer"
+                                title={`Open Official DigiLocker to verify ${docMeta.en} (${docMeta.hi})`}
                               >
-                                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 group-hover:bg-emerald-500"></span>
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 group-hover:bg-blue-500"></span>
                                 <span className="font-semibold">{docMeta.en}</span>
-                                <span className="text-[10px] text-slate-500 group-hover:text-emerald-700">({docMeta.hi})</span>
-                                <span className="ml-1 text-[10px] font-bold bg-amber-100 group-hover:bg-emerald-200 text-amber-900 group-hover:text-emerald-900 px-1 rounded">
-                                  {verifyingDocId === docId ? 'Verifying...' : '+ Verify'}
+                                <span className="text-[10px] text-slate-500 group-hover:text-blue-700">({docMeta.hi})</span>
+                                <span className="ml-1 text-[10px] font-bold bg-amber-100 group-hover:bg-blue-100 text-amber-900 group-hover:text-blue-900 px-1 rounded">
+                                  Verify in DigiLocker →
                                 </span>
                               </button>
                             );
@@ -932,10 +924,11 @@ export const EligibilityCalculator: React.FC<EligibilityCalculatorProps> = ({
                         ) : (
                           <button
                             type="button"
+                            disabled={verifyingDocId === docId}
                             onClick={() => handleQuickVerifyDoc(docId)}
-                            className="text-[10px] font-bold text-amber-900 bg-amber-100 hover:bg-emerald-600 hover:text-white px-2 py-1 rounded-lg border border-amber-300 transition whitespace-nowrap cursor-pointer"
+                            className="text-[10px] font-bold text-amber-900 bg-amber-100 hover:bg-emerald-600 hover:text-white px-2 py-1 rounded-lg border border-amber-300 transition whitespace-nowrap cursor-pointer disabled:opacity-50"
                           >
-                            + Verify Now
+                            {verifyingDocId === docId ? 'Verifying...' : '+ Verify Now'}
                           </button>
                         )}
                       </div>

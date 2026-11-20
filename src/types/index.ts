@@ -114,6 +114,20 @@ export interface DigiLockerDocumentRecord {
   verifiedAt: string;
 }
 
+export interface DigiLockerCredentialRecord {
+  id: string;
+  citizenId: string;
+  docId?: string;
+  docUri: string;
+  docName: string;
+  docNumber?: string;
+  issuer: string;
+  mimeType?: string;
+  verified: boolean;
+  issuedAt?: string;
+  verifiedAt: string;
+}
+
 export interface CitizenProfile {
   fullName: string;
   age: number;
@@ -136,6 +150,37 @@ export interface CitizenProfile {
   samagraMemberId?: string;
   phone?: string;
   verifiedDocuments: Record<string, VerifiedDocumentMeta>;
+}
+
+export interface CitizenAccountProfile {
+  uid: string;
+  email: string;
+  displayName: string;
+  phone?: string;
+  mobileNumber?: string;
+  mobileVerified?: boolean;
+  role: 'citizen';
+  authMethod: 'email';
+  samagraFamilyId?: string;
+  samagraMemberId?: string;
+  samagraId?: string;
+  areaType: AreaType;
+  wardNumber?: number;
+  blockName?: JanpadBlock;
+  category: Category;
+  age: number;
+  gender: Gender;
+  annualIncome: number;
+  occupation: OccupationType;
+  isBPL: boolean;
+  hasDisability: boolean;
+  maritalStatus: MaritalStatus;
+  isMpDomicile: boolean;
+  isIndoreResident: boolean;
+  ekycVerified: boolean;
+  createdAt: string;
+  updatedAt?: string;
+  lastLoginAt?: string;
 }
 
 export interface FamilyMember {
@@ -164,6 +209,7 @@ export interface SamagraFamily {
   address: string;
   rationCardType: 'APL' | 'BPL' | 'Antyodaya';
   members: FamilyMember[];
+  source?: string;
   createdAt?: string;
 }
 
@@ -200,6 +246,7 @@ export interface ApplicationRecord {
   schemeTitle: string;
   schemeTitleHindi: string;
   applicantName: string;
+  citizenId?: string;
   samagraMemberId: string;
   samagraFamilyId: string;
   phone: string;

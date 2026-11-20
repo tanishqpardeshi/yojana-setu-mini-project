@@ -15,17 +15,21 @@ import {
   Loader2,
 } from 'lucide-react';
 import { ApplicationRecord, SupportedLanguage } from '../types';
+import { parseApiResponse } from '../utils/apiClient';
+import { ToastItem } from './ToastContainer';
 
 interface ApplicationTrackerViewProps {
   currentLanguage: SupportedLanguage;
   applications: ApplicationRecord[];
   onNavigateToSchemes?: () => void;
+  onNotify?: (toast: Omit<ToastItem, 'id'>) => void;
 }
 
 export const ApplicationTrackerView: React.FC<ApplicationTrackerViewProps> = ({
   currentLanguage,
   applications,
   onNavigateToSchemes,
+  onNotify,
 }) => {
   const [searchArn, setSearchArn] = useState(applications[0]?.arn || '');
   const [selectedRecord, setSelectedRecord] = useState<ApplicationRecord | null>(
@@ -63,19 +67,24 @@ export const ApplicationTrackerView: React.FC<ApplicationTrackerViewProps> = ({
         setSelectedRecord(match);
       } else {
         fetch(`/api/applications/${encodeURIComponent(targetArn)}`)
-          .then(r => (r.ok ? r.json() : null))
-          .then(data => {
-            if (data?.record) {
-              setSelectedRecord(data.record);
+          .then(res => parseApiResponse<{ record?: ApplicationRecord }>(res))
+          .then(parsed => {
+            if (parsed.ok && parsed.data?.record) {
+              setSelectedRecord(parsed.data.record);
+            } else if (!parsed.ok) {
+              setSearchError(parsed.errorInfo?.error || `ARN "${targetArn}" was not found.`);
             }
           })
-          .catch(() => {});
+          .catch(() => {
+            setSearchError('Unable to reach live ARN tracking service.');
+          });
       }
     }
   }, [applications]);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSearching) return;
     setSearchError(null);
     const cleaned = searchArn.trim().toUpperCase();
     if (!cleaned) {
@@ -92,18 +101,25 @@ export const ApplicationTrackerView: React.FC<ApplicationTrackerViewProps> = ({
     setIsSearching(true);
     try {
       const res = await fetch(`/api/applications/${encodeURIComponent(cleaned)}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.record) {
-          setSelectedRecord(data.record);
-          return;
-        }
+      const parsed = await parseApiResponse<{ record?: ApplicationRecord }>(res);
+      if (parsed.ok && parsed.data?.record) {
+        setSelectedRecord(parsed.data.record);
+        return;
       }
-      setSearchError(
-        `ARN "${cleaned}" was not found in Indore District live records. Submit an application under Schemes & Eligibility to generate a live ARN.`
-      );
+      const errMsg =
+        parsed.errorInfo?.error ||
+        `ARN "${cleaned}" was not found in Indore District live records.`;
+      setSearchError(errMsg);
+      onNotify?.({
+        type: 'warning',
+        title: 'ARN Lookup Failed',
+        message: errMsg,
+        details: parsed.errorInfo?.details,
+      });
     } catch {
-      setSearchError('Unable to reach live ARN tracking service.');
+      const msg = 'Unable to reach live ARN tracking service. Please verify server connectivity.';
+      setSearchError(msg);
+      onNotify?.({ type: 'error', title: 'Tracker Connection Error', message: msg });
     } finally {
       setIsSearching(false);
     }
@@ -118,11 +134,22 @@ export const ApplicationTrackerView: React.FC<ApplicationTrackerViewProps> = ({
     ? `${origin}/?verifyARN=${encodeURIComponent(selectedRecord.arn)}`
     : '';
 
-  const handleCopyLink = () => {
+  const handleCopyLink = async () => {
     if (!verificationUrl) return;
-    navigator.clipboard?.writeText(verificationUrl);
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2500);
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error('Clipboard API unavailable in this browser context.');
+      }
+      await navigator.clipboard.writeText(verificationUrl);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2500);
+    } catch {
+      onNotify?.({
+        type: 'warning',
+        title: 'Clipboard Copy Unavailable',
+        message: `Copy this ARN manually: ${selectedRecord?.arn || verificationUrl}`,
+      });
+    }
   };
 
   const statusMeta = selectedRecord

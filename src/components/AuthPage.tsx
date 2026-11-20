@@ -13,17 +13,18 @@ import {
   ArrowRight,
   LogOut,
   Users,
-  Phone,
   Bookmark,
   FileText,
   Sparkles,
   Loader2,
   UserPlus,
+  ExternalLink,
 } from 'lucide-react';
 import { User as FirebaseUser } from 'firebase/auth';
 import {
   AreaType,
   Category,
+  CitizenAccountProfile,
   CitizenProfile,
   FamilyMember,
   Gender,
@@ -35,19 +36,29 @@ import {
 } from '../types';
 import {
   AuthResult,
-  loginCitizenWithEmail,
-  registerCitizenWithEmail,
-  resetCitizenPassword,
   signInWithGoogle,
   UserProfileDoc,
 } from '../firebase';
+import { ToastItem } from './ToastContainer';
+import { ApiRequestError, parseApiResponse } from '../utils/apiClient';
+import { MobileOtpVerifier } from './MobileOtpVerifier';
+import {
+  SAMAGRA_PORTAL_URL,
+  validateIndianMobile,
+  validateSamagraFamilyId,
+  validateSamagraLookupId,
+  validateSamagraMemberId,
+} from '../utils/samagraValidator';
 
 interface AuthPageProps {
   currentLanguage: SupportedLanguage;
   firebaseUser: FirebaseUser | null;
+  citizenAccountUser: CitizenAccountProfile | null;
+  citizenAuthToken?: string | null;
   userProfileDoc: UserProfileDoc | null;
   citizenProfile: CitizenProfile;
   onAuthSuccess: (result: AuthResult) => void;
+  onEmailAuthSuccess: (token: string, profile: CitizenAccountProfile) => void;
   onSamagraSessionLogin: (member: FamilyMember, family: SamagraFamily) => Promise<void>;
   onUpdateCitizenProfile: (updates: Partial<UserProfileDoc>) => Promise<void>;
   onSignOut: () => Promise<void>;
@@ -56,6 +67,7 @@ interface AuthPageProps {
   savedSchemesCount: number;
   initialMode?: 'login' | 'signup';
   authBannerMessage?: string | null;
+  onNotify?: (toast: Omit<ToastItem, 'id'>) => void;
 }
 
 const OCCUPATIONS: OccupationType[] = [
@@ -76,53 +88,37 @@ const CATEGORIES: Category[] = ['GEN', 'OBC', 'SC', 'ST', 'EWS'];
 const JANPAD_BLOCKS: JanpadBlock[] = ['Indore', 'Mhow', 'Sanwer', 'Depalpur'];
 const MARITAL_STATUSES: MaritalStatus[] = ['Married', 'Unmarried', 'Widow', 'Divorced'];
 
-function formatAuthErrorMessage(err: unknown): { message: string; isProviderDisabled?: boolean } {
+function formatAuthErrorMessage(err: unknown): string {
   const code = (err as { code?: string })?.code || '';
   const rawMsg = err instanceof Error ? err.message : String(err);
 
-  if (code === 'auth/operation-not-allowed' || rawMsg.includes('operation-not-allowed')) {
-    return {
-      message:
-        'Email/Password sign-in is not yet enabled in the Firebase Console for this project. Enable Email/Password under Authentication → Sign-in method, or use Google Login / Samagra ID below.',
-      isProviderDisabled: true,
-    };
-  }
-  if (code === 'auth/email-already-in-use') {
-    return { message: 'An account with this email already exists. Switch to Sign In to access your account.' };
-  }
-  if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found') {
-    return { message: 'Invalid email or password. Please verify your credentials or reset your password.' };
-  }
-  if (code === 'auth/weak-password') {
-    return { message: 'Password must be at least 6 characters long.' };
-  }
-  if (code === 'auth/invalid-email') {
-    return { message: 'Please enter a valid email address.' };
-  }
   if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
-    return { message: 'Google sign-in popup was closed before completing login. Please try again.' };
+    return 'Google sign-in popup was closed before completing login. Please try again.';
   }
   if (code === 'auth/popup-blocked') {
-    return { message: 'Browser blocked the Google sign-in popup. Please allow popups for this site and try again.' };
+    return 'Browser blocked the Google sign-in popup. Please allow popups for this site and try again.';
   }
   if (code === 'auth/unauthorized-domain') {
-    return { message: 'This domain is not authorized for Firebase Auth. Please check Firebase project domain settings.' };
+    return 'This domain is not authorized for Google Sign-In. Please check Firebase project domain settings.';
   }
   if (code === 'auth/too-many-requests') {
-    return { message: 'Too many authentication attempts. Please wait a few moments before trying again.' };
+    return 'Too many authentication attempts. Please wait a few moments before trying again.';
   }
   if (code === 'auth/network-request-failed') {
-    return { message: 'Network error communicating with Firebase Authentication. Check your internet connection and retry.' };
+    return 'Network error communicating with authentication server. Check your connection and retry.';
   }
-  return { message: rawMsg || 'Authentication failed. Please try again.' };
+  return rawMsg || 'Authentication failed. Please try again.';
 }
 
 export const AuthPage: React.FC<AuthPageProps> = ({
   currentLanguage,
   firebaseUser,
+  citizenAccountUser,
+  citizenAuthToken,
   userProfileDoc,
   citizenProfile,
   onAuthSuccess,
+  onEmailAuthSuccess,
   onSamagraSessionLogin,
   onUpdateCitizenProfile,
   onSignOut,
@@ -131,6 +127,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
   savedSchemesCount,
   initialMode = 'login',
   authBannerMessage,
+  onNotify,
 }) => {
   const [authMode, setAuthMode] = useState<'login' | 'signup'>(initialMode);
   const [authMethod, setAuthMethod] = useState<'google' | 'samagra' | 'email'>('google');
@@ -144,6 +141,8 @@ export const AuthPage: React.FC<AuthPageProps> = ({
   // Citizen demographic registration fields
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
+  const [mobileVerified, setMobileVerified] = useState(false);
+  const [mobileVerificationToken, setMobileVerificationToken] = useState<string | null>(null);
   const [samagraFamilyId, setSamagraFamilyId] = useState('');
   const [samagraMemberId, setSamagraMemberId] = useState('');
   const [areaType, setAreaType] = useState<AreaType>('urban');
@@ -166,6 +165,13 @@ export const AuthPage: React.FC<AuthPageProps> = ({
   const [liveSamagraList, setLiveSamagraList] = useState<SamagraFamily[]>([]);
   const [samagraLoading, setSamagraLoading] = useState(false);
   const [samagraError, setSamagraError] = useState<string | null>(null);
+  const [samagraNotice, setSamagraNotice] = useState<string | null>(null);
+  const [samagraPortalFallback, setSamagraPortalFallback] = useState<{
+    error: string;
+    details?: string;
+    portalUrl?: string;
+    allowManualEntry?: boolean;
+  } | null>(null);
 
   useEffect(() => {
     try {
@@ -199,48 +205,74 @@ export const AuthPage: React.FC<AuthPageProps> = ({
   // Operational state
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [providerDisabledHint, setProviderDisabledHint] = useState(false);
+  const [errorDetails, setErrorDetails] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  const activeCitizenUser = firebaseUser || citizenAccountUser;
+  const activeAccountProfile = citizenAccountUser || userProfileDoc;
 
   // Sync profile completion editor when signed in
   useEffect(() => {
-    if (firebaseUser) {
-      setFullName(userProfileDoc?.displayName || firebaseUser.displayName || citizenProfile.fullName);
-      setPhone(userProfileDoc?.phone || '');
-      setSamagraFamilyId(userProfileDoc?.samagraFamilyId || citizenProfile.samagraFamilyId || '');
-      setSamagraMemberId(userProfileDoc?.samagraMemberId || citizenProfile.samagraMemberId || '');
-      setAreaType(userProfileDoc?.areaType || citizenProfile.areaType);
-      setWardNumber(userProfileDoc?.wardNumber ?? citizenProfile.wardNumber ?? 72);
-      setBlockName(userProfileDoc?.blockName || citizenProfile.blockName || 'Indore');
-      setAge(userProfileDoc?.age ?? citizenProfile.age);
-      setGender(userProfileDoc?.gender || citizenProfile.gender);
-      setCategory(userProfileDoc?.category || citizenProfile.category);
-      setOccupation(userProfileDoc?.occupation || citizenProfile.occupation);
-      setAnnualIncome(userProfileDoc?.annualIncome ?? citizenProfile.annualIncome);
-      setMaritalStatus(userProfileDoc?.maritalStatus || citizenProfile.maritalStatus);
-      setIsBPL(userProfileDoc?.isBPL ?? citizenProfile.isBPL);
-      setHasDisability(userProfileDoc?.hasDisability ?? citizenProfile.hasDisability);
-      setIsMpDomicile(userProfileDoc?.isMpDomicile ?? citizenProfile.isMpDomicile);
-      setIsIndoreResident(userProfileDoc?.isIndoreResident ?? citizenProfile.isIndoreResident);
+    if (activeCitizenUser) {
+      const acctMobile = activeAccountProfile?.mobileNumber || activeAccountProfile?.phone || '';
+      setFullName(activeAccountProfile?.displayName || activeCitizenUser.displayName || citizenProfile.fullName);
+      setPhone(acctMobile);
+      setMobileVerified(Boolean(activeAccountProfile?.mobileVerified));
+      setMobileVerificationToken(null);
+      setSamagraFamilyId(activeAccountProfile?.samagraFamilyId || citizenProfile.samagraFamilyId || '');
+      setSamagraMemberId(activeAccountProfile?.samagraMemberId || citizenProfile.samagraMemberId || '');
+      setAreaType(activeAccountProfile?.areaType || citizenProfile.areaType);
+      setWardNumber(activeAccountProfile?.wardNumber ?? citizenProfile.wardNumber ?? 72);
+      setBlockName(activeAccountProfile?.blockName || citizenProfile.blockName || 'Indore');
+      setAge(activeAccountProfile?.age ?? citizenProfile.age);
+      setGender(activeAccountProfile?.gender || citizenProfile.gender);
+      setCategory(activeAccountProfile?.category || citizenProfile.category);
+      setOccupation(activeAccountProfile?.occupation || citizenProfile.occupation);
+      setAnnualIncome(activeAccountProfile?.annualIncome ?? citizenProfile.annualIncome);
+      setMaritalStatus(activeAccountProfile?.maritalStatus || citizenProfile.maritalStatus);
+      setIsBPL(activeAccountProfile?.isBPL ?? citizenProfile.isBPL);
+      setHasDisability(activeAccountProfile?.hasDisability ?? citizenProfile.hasDisability);
+      setIsMpDomicile(activeAccountProfile?.isMpDomicile ?? citizenProfile.isMpDomicile);
+      setIsIndoreResident(activeAccountProfile?.isIndoreResident ?? citizenProfile.isIndoreResident);
     }
-  }, [firebaseUser, userProfileDoc, citizenProfile]);
+  }, [activeCitizenUser, activeAccountProfile, citizenProfile]);
+
+  const handlePhoneInputChange = (nextVal: string) => {
+    setPhone(nextVal);
+    setMobileVerificationToken(null);
+    const savedMobile = activeAccountProfile?.mobileNumber || activeAccountProfile?.phone || '';
+    const savedCheck = validateIndianMobile(savedMobile);
+    const nextCheck = validateIndianMobile(nextVal);
+    if (
+      activeCitizenUser &&
+      activeAccountProfile?.mobileVerified &&
+      savedCheck.valid &&
+      nextCheck.valid &&
+      savedCheck.e164 === nextCheck.e164
+    ) {
+      setMobileVerified(true);
+    } else {
+      setMobileVerified(false);
+    }
+  };
 
   const handleGoogleLogin = async () => {
+    if (isSubmitting) return;
     setErrorMsg(null);
+    setErrorDetails(null);
     setSuccessMsg(null);
-    setProviderDisabledHint(false);
     setIsSubmitting(true);
     try {
       const result = await signInWithGoogle();
       onAuthSuccess(result);
-      setSuccessMsg(
-        result.isNewUser
-          ? 'Welcome to YojanaSetu! Your Google account is registered in Firestore. You can link your Samagra ID below.'
-          : `Signed in as ${result.profile.displayName}. Your citizen profile and saved schemes are synced.`
-      );
     } catch (err) {
-      const parsed = formatAuthErrorMessage(err);
-      setErrorMsg(parsed.message);
+      const msg = formatAuthErrorMessage(err);
+      setErrorMsg(msg);
+      onNotify?.({
+        type: 'error',
+        title: 'Google Sign-In Failed',
+        message: msg,
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -248,9 +280,10 @@ export const AuthPage: React.FC<AuthPageProps> = ({
 
   const handleEmailAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     setErrorMsg(null);
+    setErrorDetails(null);
     setSuccessMsg(null);
-    setProviderDisabledHint(false);
 
     if (!email.trim() || !password) {
       setErrorMsg('Please enter both email address and password.');
@@ -270,154 +303,197 @@ export const AuthPage: React.FC<AuthPageProps> = ({
         setErrorMsg('Passwords do not match.');
         return;
       }
+      if (phone.trim()) {
+        const phoneCheck = validateIndianMobile(phone);
+        if (!phoneCheck.valid) {
+          setErrorMsg(
+            phoneCheck.error ||
+              'Enter a valid Indian mobile number (+91 followed by 10 digits starting with 6-9).'
+          );
+          return;
+        }
+      }
+      if (samagraFamilyId.trim()) {
+        const famCheck = validateSamagraFamilyId(samagraFamilyId);
+        if (!famCheck.valid) {
+          setErrorMsg(famCheck.error || 'Samagra Family ID must be exactly 8 numeric digits.');
+          return;
+        }
+      }
+      if (samagraMemberId.trim()) {
+        const memCheck = validateSamagraMemberId(samagraMemberId);
+        if (!memCheck.valid) {
+          setErrorMsg(memCheck.error || 'Samagra Member ID must be exactly 9 numeric digits.');
+          return;
+        }
+      }
     }
 
     setIsSubmitting(true);
     try {
       if (authMode === 'login') {
-        const result = await loginCitizenWithEmail(email, password);
-        onAuthSuccess(result);
-        setSuccessMsg(`Welcome back, ${result.profile.displayName}. Your profile has been loaded from Firestore.`);
+        const res = await fetch('/api/citizen/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: email.trim(),
+            password,
+          }),
+        });
+        const parsed = await parseApiResponse<{ token?: string; profile?: CitizenAccountProfile }>(res);
+        if (!parsed.ok || !parsed.data?.token || !parsed.data?.profile) {
+          const errInfo = parsed.errorInfo || {
+            status: parsed.status,
+            error: 'Invalid email or password. Please verify your credentials.',
+          };
+          onNotify?.({
+            type: 'error',
+            title: 'Citizen Sign-In Failed',
+            message: errInfo.error,
+            details: errInfo.details,
+          });
+          throw new ApiRequestError(errInfo);
+        }
+        onEmailAuthSuccess(parsed.data.token, parsed.data.profile);
       } else {
-        // Generate or use provided Samagra IDs
-        const cleanFamilyId =
-          samagraFamilyId.trim() || String(Math.floor(40000000 + Math.random() * 59999999));
-        const cleanMemberId =
-          samagraMemberId.trim() || String(Math.floor(100000000 + Math.random() * 899999999));
-
         const safeWard = Math.min(85, Math.max(1, Number.isFinite(wardNumber) ? Math.round(wardNumber) : 72));
         const safeAge = Math.min(120, Math.max(0, Number.isFinite(age) ? Math.round(age) : 30));
         const safeIncome = Math.max(0, Number.isFinite(annualIncome) ? Math.round(annualIncome) : 0);
+        const mobileCheck = phone.trim() ? validateIndianMobile(phone) : null;
 
-        const result = await registerCitizenWithEmail({
-          email,
-          password,
-          displayName: fullName,
-          phone: phone || '9826000000',
-          samagraFamilyId: cleanFamilyId,
-          samagraMemberId: cleanMemberId,
-          areaType,
-          wardNumber: areaType === 'urban' ? safeWard : undefined,
-          blockName: areaType === 'rural' ? blockName : undefined,
-          category,
-          age: safeAge,
-          gender,
-          annualIncome: safeIncome,
-          occupation,
-          isBPL,
-          hasDisability,
-          maritalStatus,
-          isMpDomicile,
-          isIndoreResident,
+        const res = await fetch('/api/citizen/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: email.trim(),
+            password,
+            displayName: fullName.trim(),
+            mobileNumber: mobileCheck?.valid ? mobileCheck.e164 : undefined,
+            phone: mobileCheck?.valid ? mobileCheck.e164 : undefined,
+            mobileVerificationToken: mobileVerificationToken || undefined,
+            samagraFamilyId: samagraFamilyId.trim() || undefined,
+            samagraMemberId: samagraMemberId.trim() || undefined,
+            areaType,
+            wardNumber: areaType === 'urban' ? safeWard : undefined,
+            blockName: areaType === 'rural' ? blockName : undefined,
+            category,
+            age: safeAge,
+            gender,
+            annualIncome: safeIncome,
+            occupation,
+            isBPL,
+            hasDisability,
+            maritalStatus,
+            isMpDomicile,
+            isIndoreResident,
+          }),
         });
 
-        // Also register in local SQLite Samagra registry so Samagra lookup works immediately
-        try {
-          const samRes = await fetch('/api/samagra/register', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              familyId: cleanFamilyId,
-              headName: fullName.trim(),
-              areaType,
-              wardOrBlock:
-                areaType === 'urban'
-                  ? `Ward ${safeWard} (Indore IMC)`
-                  : `${blockName} Janpad Panchayat`,
-              address:
-                areaType === 'urban'
-                  ? `Ward ${safeWard}, Indore Municipal Corporation, MP`
-                  : `${blockName} Block, Indore District, MP`,
-              rationCardType: isBPL ? 'BPL' : 'APL',
-              members: [
-                {
-                  memberId: cleanMemberId,
-                  name: fullName.trim(),
-                  nameHindi: fullName.trim(),
-                  relation: 'Self / Head',
-                  relationHindi: 'स्वयं / मुखिया',
-                  age: safeAge,
-                  gender,
-                  occupation,
-                  ekycStatus: true,
-                  dbtActive: true,
-                  annualIncome: safeIncome,
-                  maritalStatus,
-                },
-              ],
-            }),
+        const parsed = await parseApiResponse<{ token?: string; profile?: CitizenAccountProfile }>(res);
+        if (!parsed.ok || !parsed.data?.token || !parsed.data?.profile) {
+          const errInfo = parsed.errorInfo || {
+            status: parsed.status,
+            error: 'Failed to create citizen account. Please try again.',
+          };
+          onNotify?.({
+            type: 'error',
+            title: 'Registration Failed',
+            message: errInfo.error,
+            details: errInfo.details,
           });
-          if (samRes.ok) {
-            try {
-              const prevRaw = localStorage.getItem('yojanasetu_my_samagra_ids');
-              const prevIds = prevRaw ? JSON.parse(prevRaw) : [];
-              const nextIds = Array.from(new Set([cleanFamilyId, ...(Array.isArray(prevIds) ? prevIds : [])])).slice(0, 12);
-              localStorage.setItem('yojanasetu_my_samagra_ids', JSON.stringify(nextIds));
-            } catch {
-              // ignore storage errors
-            }
-          } else {
-            console.warn('SQLite Samagra sync returned status:', samRes.status);
-          }
-        } catch (samErr) {
-          console.warn('SQLite Samagra sync skipped:', samErr);
+          throw new ApiRequestError(errInfo);
         }
 
-        onAuthSuccess(result);
-        setSuccessMsg(
-          `Citizen account created and saved in Firestore! Assigned Samagra Family ID: ${cleanFamilyId}`
-        );
+        const createdProfile = parsed.data.profile;
+        if (createdProfile.samagraFamilyId) {
+          try {
+            const prevRaw = localStorage.getItem('yojanasetu_my_samagra_ids');
+            const prevIds = prevRaw ? JSON.parse(prevRaw) : [];
+            const nextIds = Array.from(
+              new Set([createdProfile.samagraFamilyId, ...(Array.isArray(prevIds) ? prevIds : [])])
+            ).slice(0, 12);
+            localStorage.setItem('yojanasetu_my_samagra_ids', JSON.stringify(nextIds));
+          } catch {
+            // ignore storage errors
+          }
+        }
+
+        onEmailAuthSuccess(parsed.data.token, createdProfile);
       }
     } catch (err) {
-      const parsed = formatAuthErrorMessage(err);
-      setErrorMsg(parsed.message);
-      setProviderDisabledHint(Boolean(parsed.isProviderDisabled));
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleForgotPassword = async () => {
-    setErrorMsg(null);
-    setSuccessMsg(null);
-    if (!email.trim()) {
-      setErrorMsg('Enter your registered email address first to receive a password reset link.');
-      return;
-    }
-    setIsSubmitting(true);
-    try {
-      await resetCitizenPassword(email);
-      setSuccessMsg(`Password reset email sent to ${email.trim()}. Check your inbox.`);
-    } catch (err) {
-      const parsed = formatAuthErrorMessage(err);
-      setErrorMsg(parsed.message);
+      if (err instanceof ApiRequestError) {
+        setErrorMsg(err.message);
+        setErrorDetails(err.details || null);
+      } else {
+        setErrorMsg(formatAuthErrorMessage(err));
+      }
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const handleSamagraSearch = async (queryId?: string) => {
+    if (samagraLoading) return;
     const idToSearch = (queryId ?? samagraQuery).trim();
-    if (!idToSearch) return;
+    const validation = validateSamagraLookupId(idToSearch);
+    if (!validation.valid) {
+      setSamagraFamilyResult(null);
+      setSamagraPortalFallback(null);
+      setSamagraNotice(null);
+      setSamagraError(validation.error || 'Enter a valid 8-digit Family ID or 9-digit Member ID.');
+      return;
+    }
+
     setSamagraLoading(true);
     setSamagraError(null);
+    setSamagraNotice(null);
+    setSamagraPortalFallback(null);
     try {
-      const res = await fetch(`/api/samagra/${encodeURIComponent(idToSearch)}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.family) {
-          setSamagraFamilyResult(data.family);
-          setSamagraLoading(false);
-          return;
-        }
+      const res = await fetch(`/api/samagra/${encodeURIComponent(validation.cleaned)}`);
+      const parsed = await parseApiResponse<{
+        family?: SamagraFamily;
+        source?: string;
+        liveConfigured?: boolean;
+        notice?: string;
+      }>(res);
+      if (parsed.ok && parsed.data?.family) {
+        setSamagraFamilyResult(parsed.data.family);
+        setSamagraNotice(parsed.data.notice || null);
+        setSamagraPortalFallback(null);
+        return;
       }
+
+      const errInfo = parsed.errorInfo || {
+        status: parsed.status,
+        error: `No verified Samagra record found for "${validation.cleaned}".`,
+        portalUrl: SAMAGRA_PORTAL_URL,
+        allowManualEntry: true,
+      };
       setSamagraFamilyResult(null);
-      setSamagraError(
-        `No live Samagra record found for "${idToSearch}". Register your Samagra household in the Samagra Family portal first.`
-      );
+      setSamagraError(errInfo.error);
+      setSamagraPortalFallback({
+        error: errInfo.error,
+        details: errInfo.details,
+        portalUrl: errInfo.portalUrl || SAMAGRA_PORTAL_URL,
+        allowManualEntry: errInfo.allowManualEntry ?? true,
+      });
+      onNotify?.({
+        type: 'warning',
+        title: 'Samagra Lookup Notice',
+        message: errInfo.error,
+        details: errInfo.details,
+        actionUrl: errInfo.portalUrl || SAMAGRA_PORTAL_URL,
+        actionLabel: 'Verify on samagra.gov.in',
+      });
     } catch {
+      const msg = 'Unable to reach live Samagra directory API. Please try again.';
       setSamagraFamilyResult(null);
-      setSamagraError('Unable to reach live Samagra directory API. Please try again.');
+      setSamagraError(msg);
+      onNotify?.({
+        type: 'error',
+        title: 'Network Error',
+        message: msg,
+      });
     } finally {
       setSamagraLoading(false);
     }
@@ -425,17 +501,49 @@ export const AuthPage: React.FC<AuthPageProps> = ({
 
   const handleSaveProfileUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     setErrorMsg(null);
+    setErrorDetails(null);
     setSuccessMsg(null);
+
+    if (phone.trim()) {
+      const mobileCheck = validateIndianMobile(phone);
+      if (!mobileCheck.valid) {
+        setErrorMsg(
+          mobileCheck.error ||
+            'Enter a valid Indian mobile number (+91 followed by 10 digits starting with 6-9).'
+        );
+        return;
+      }
+    }
+    if (samagraFamilyId.trim()) {
+      const famCheck = validateSamagraFamilyId(samagraFamilyId);
+      if (!famCheck.valid) {
+        setErrorMsg(famCheck.error || 'Samagra Family ID must be exactly 8 numeric digits.');
+        return;
+      }
+    }
+    if (samagraMemberId.trim()) {
+      const memCheck = validateSamagraMemberId(samagraMemberId);
+      if (!memCheck.valid) {
+        setErrorMsg(memCheck.error || 'Samagra Member ID must be exactly 9 numeric digits.');
+        return;
+      }
+    }
+
     setIsSubmitting(true);
     try {
       const safeWard = Math.min(85, Math.max(1, Number.isFinite(wardNumber) ? Math.round(wardNumber) : 72));
       const safeAge = Math.min(120, Math.max(0, Number.isFinite(age) ? Math.round(age) : 30));
       const safeIncome = Math.max(0, Number.isFinite(annualIncome) ? Math.round(annualIncome) : 0);
+      const mobileCheck = phone.trim() ? validateIndianMobile(phone) : null;
 
       await onUpdateCitizenProfile({
-        displayName: fullName.trim() || firebaseUser?.displayName || 'Citizen of Indore',
-        phone: phone.trim(),
+        displayName: fullName.trim() || activeCitizenUser?.displayName || 'Citizen of Indore',
+        phone: mobileCheck?.valid ? mobileCheck.e164 : '',
+        mobileNumber: mobileCheck?.valid ? mobileCheck.e164 : '',
+        mobileVerified,
+        mobileVerificationToken: mobileVerificationToken || undefined,
         samagraFamilyId: samagraFamilyId.trim() || undefined,
         samagraMemberId: samagraMemberId.trim() || undefined,
         samagraId: samagraMemberId.trim() || samagraFamilyId.trim() || undefined,
@@ -457,17 +565,44 @@ export const AuthPage: React.FC<AuthPageProps> = ({
       setWardNumber(safeWard);
       setAge(safeAge);
       setAnnualIncome(safeIncome);
-      setSuccessMsg('Citizen profile & Samagra details synced to Firebase Firestore.');
+      setSuccessMsg(
+        citizenAccountUser
+          ? 'Citizen profile & Samagra details saved to your account.'
+          : 'Citizen profile & Samagra details synced to Firebase Firestore.'
+      );
+      onNotify?.({
+        type: 'success',
+        title: 'Profile Updated',
+        message: 'Your Citizen profile & Samagra details have been saved.',
+      });
     } catch (err) {
-      const parsed = formatAuthErrorMessage(err);
-      setErrorMsg(parsed.message);
+      if (err instanceof ApiRequestError) {
+        setErrorMsg(err.message);
+        setErrorDetails(err.details || null);
+        onNotify?.({
+          type: 'error',
+          title: 'Profile Save Failed',
+          message: err.message,
+          details: err.details,
+        });
+      } else {
+        const msg = formatAuthErrorMessage(err);
+        setErrorMsg(msg);
+        onNotify?.({
+          type: 'error',
+          title: 'Profile Save Failed',
+          message: msg,
+        });
+      }
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const handleSamagraMemberLogin = async (member: FamilyMember, family: SamagraFamily) => {
+    if (isSubmitting) return;
     setErrorMsg(null);
+    setErrorDetails(null);
     setSuccessMsg(null);
     setIsSubmitting(true);
     try {
@@ -476,8 +611,13 @@ export const AuthPage: React.FC<AuthPageProps> = ({
         `Logged in as ${member.name} (Samagra ${member.memberId}). Schemes updated for your profile.`
       );
     } catch (err) {
-      const parsed = formatAuthErrorMessage(err);
-      setErrorMsg(parsed.message);
+      const msg = formatAuthErrorMessage(err);
+      setErrorMsg(msg);
+      onNotify?.({
+        type: 'error',
+        title: 'Samagra Login Failed',
+        message: msg,
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -519,11 +659,11 @@ export const AuthPage: React.FC<AuthPageProps> = ({
             <p className="text-sm text-slate-600 leading-relaxed">{headingSub}</p>
           </div>
 
-          {firebaseUser ? (
+          {activeCitizenUser ? (
             <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-5">
               <div className="flex items-start justify-between gap-4">
                 <div className="flex items-center gap-3.5 min-w-0">
-                  {firebaseUser.photoURL ? (
+                  {firebaseUser?.photoURL ? (
                     <img
                       src={firebaseUser.photoURL}
                       alt={firebaseUser.displayName || 'Citizen'}
@@ -532,18 +672,20 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                     />
                   ) : (
                     <div className="w-12 h-12 rounded-full bg-slate-900 text-white flex items-center justify-center text-lg font-bold shrink-0">
-                      {(userProfileDoc?.displayName || firebaseUser.displayName || firebaseUser.email || 'C')[0].toUpperCase()}
+                      {(activeAccountProfile?.displayName || activeCitizenUser.displayName || activeCitizenUser.email || 'C')[0].toUpperCase()}
                     </div>
                   )}
                   <div className="min-w-0">
                     <h2 className="text-base font-bold text-slate-900 truncate">
-                      {userProfileDoc?.displayName || firebaseUser.displayName || citizenProfile.fullName}
+                      {activeAccountProfile?.displayName || activeCitizenUser.displayName || citizenProfile.fullName}
                     </h2>
-                    <p className="text-xs text-slate-500 truncate">{firebaseUser.email}</p>
+                    <p className="text-xs text-slate-500 truncate">{activeCitizenUser.email}</p>
                     <div className="flex items-center gap-2 mt-1 text-xs text-emerald-700 font-medium">
                       <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
                       <span>
-                        Firestore Synced · {userProfileDoc?.authMethod === 'email' ? 'Citizen Email Auth' : 'Google Auth'}
+                        {citizenAccountUser
+                          ? 'Database Synced · Citizen Email Auth'
+                          : 'Firestore Synced · Google Auth'}
                       </span>
                     </div>
                   </div>
@@ -554,21 +696,21 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                 <div>
                   <span className="text-slate-500 block">Samagra Family ID</span>
                   <span className="font-mono tabular-nums font-bold text-slate-900 text-sm">
-                    {userProfileDoc?.samagraFamilyId || citizenProfile.samagraFamilyId || 'Not linked'}
+                    {activeAccountProfile?.samagraFamilyId || citizenProfile.samagraFamilyId || 'Not linked'}
                   </span>
                 </div>
                 <div>
                   <span className="text-slate-500 block">Samagra Member ID</span>
                   <span className="font-mono tabular-nums font-bold text-slate-900 text-sm">
-                    {userProfileDoc?.samagraMemberId || citizenProfile.samagraMemberId || 'Not linked'}
+                    {activeAccountProfile?.samagraMemberId || citizenProfile.samagraMemberId || 'Not linked'}
                   </span>
                 </div>
                 <div>
                   <span className="text-slate-500 block">Jurisdiction</span>
                   <span className="font-semibold text-slate-900">
-                    {(userProfileDoc?.areaType || citizenProfile.areaType) === 'urban'
-                      ? `IMC Ward ${userProfileDoc?.wardNumber ?? citizenProfile.wardNumber ?? 72}`
-                      : `${userProfileDoc?.blockName || citizenProfile.blockName || 'Indore'} Janpad`}
+                    {(activeAccountProfile?.areaType || citizenProfile.areaType) === 'urban'
+                      ? `IMC Ward ${activeAccountProfile?.wardNumber ?? citizenProfile.wardNumber ?? 72}`
+                      : `${activeAccountProfile?.blockName || citizenProfile.blockName || 'Indore'} Janpad`}
                   </span>
                 </div>
                 <div>
@@ -603,7 +745,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                   onClick={async () => {
                     setErrorMsg(null);
                     setSuccessMsg(null);
-                    setProviderDisabledHint(false);
                     await onSignOut();
                   }}
                   className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white hover:bg-rose-50 text-rose-700 border border-rose-200 text-xs font-semibold transition whitespace-nowrap cursor-pointer ml-auto"
@@ -649,8 +790,8 @@ export const AuthPage: React.FC<AuthPageProps> = ({
             </div>
           )}
 
-          {/* Active local Samagra Session status when not Firebase signed in */}
-          {!firebaseUser && (
+          {/* Active local Samagra Session status when not signed in */}
+          {!activeCitizenUser && (
             <div className="bg-slate-900 text-slate-100 rounded-2xl p-5 space-y-2">
               <div className="flex items-center justify-between text-xs text-slate-400">
                 <span>Active Local Citizen Session</span>
@@ -673,37 +814,16 @@ export const AuthPage: React.FC<AuthPageProps> = ({
         <div className="lg:col-span-7">
           <div className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 space-y-6">
             {errorMsg && (
-              <div className="bg-rose-50 border border-rose-200 text-rose-900 rounded-xl p-4 text-xs space-y-2">
+              <div className="bg-rose-50 border border-rose-200 text-rose-900 rounded-xl p-4 text-xs" role="alert">
                 <div className="flex items-start gap-2.5">
                   <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-                  <p className="leading-relaxed font-medium">{errorMsg}</p>
-                </div>
-                {providerDisabledHint && (
-                  <div className="pl-6 flex flex-wrap gap-2 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAuthMethod('google');
-                        setErrorMsg(null);
-                        setProviderDisabledHint(false);
-                      }}
-                      className="px-3 py-1.5 rounded-lg bg-slate-900 text-white font-semibold hover:bg-slate-800 transition cursor-pointer"
-                    >
-                      Use Google Login Instead
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAuthMethod('samagra');
-                        setErrorMsg(null);
-                        setProviderDisabledHint(false);
-                      }}
-                      className="px-3 py-1.5 rounded-lg bg-amber-500 text-slate-950 font-semibold hover:bg-amber-600 transition cursor-pointer"
-                    >
-                      Use Samagra ID Login
-                    </button>
+                  <div className="space-y-1">
+                    <p className="leading-relaxed font-semibold">{errorMsg}</p>
+                    {errorDetails && (
+                      <p className="leading-relaxed text-rose-700">{errorDetails}</p>
+                    )}
                   </div>
-                )}
+                </div>
               </div>
             )}
 
@@ -714,8 +834,8 @@ export const AuthPage: React.FC<AuthPageProps> = ({
               </div>
             )}
 
-            {firebaseUser ? (
-              /* Signed-In Citizen Firestore Profile & Samagra Linking Form */
+            {activeCitizenUser ? (
+              /* Signed-In Citizen Profile & Samagra Linking Form */
               <form onSubmit={handleSaveProfileUpdate} className="space-y-5">
                 <div className="flex items-center justify-between border-b border-slate-100 pb-4">
                   <div>
@@ -723,7 +843,9 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                       Complete & Sync Citizen Profile
                     </h2>
                     <p className="text-xs text-slate-500">
-                      Link your Samagra ID and Indore ward/block details directly to your Firestore account.
+                      {citizenAccountUser
+                        ? 'Update your Samagra ID and Indore ward/block details directly in your YojanaSetu account.'
+                        : 'Link your Samagra ID and Indore ward/block details directly to your Firestore account.'}
                     </p>
                   </div>
                 </div>
@@ -742,17 +864,20 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                       className="w-full px-3.5 py-2.5 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500"
                     />
                   </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Mobile Number
-                    </label>
-                    <input
-                      type="tel"
+                  <div className="sm:col-span-2">
+                    <MobileOtpVerifier
                       value={phone}
-                      onChange={e => setPhone(e.target.value)}
-                      placeholder="+91 98260 XXXXX"
-                      maxLength={20}
-                      className="w-full px-3.5 py-2.5 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono tabular-nums"
+                      onChange={handlePhoneInputChange}
+                      isVerified={mobileVerified}
+                      verificationToken={mobileVerificationToken}
+                      onVerified={({ mobileNumber, verificationToken }) => {
+                        setPhone(mobileNumber);
+                        setMobileVerified(true);
+                        setMobileVerificationToken(verificationToken);
+                      }}
+                      authToken={citizenAuthToken}
+                      disabled={isSubmitting}
+                      onNotify={onNotify}
                     />
                   </div>
                   <div>
@@ -929,7 +1054,11 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                     className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-60 text-white text-sm font-bold transition cursor-pointer"
                   >
                     {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
-                    <span>Save & Sync Profile to Firestore</span>
+                    <span>
+                      {citizenAccountUser
+                        ? 'Save Citizen Profile Changes'
+                        : 'Save & Sync Profile to Firestore'}
+                    </span>
                   </button>
                 </div>
               </form>
@@ -944,6 +1073,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                       onClick={() => {
                         setAuthMode('login');
                         setErrorMsg(null);
+                        setErrorDetails(null);
                         setSuccessMsg(null);
                       }}
                       className={`px-4 py-2 text-xs font-bold rounded-lg transition whitespace-nowrap cursor-pointer ${
@@ -960,6 +1090,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                         setAuthMode('signup');
                         setAuthMethod('email');
                         setErrorMsg(null);
+                        setErrorDetails(null);
                         setSuccessMsg(null);
                       }}
                       className={`px-4 py-2 text-xs font-bold rounded-lg transition whitespace-nowrap cursor-pointer ${
@@ -1162,8 +1293,42 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                     </div>
 
                     {samagraError && (
-                      <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-xl p-3 text-xs">
-                        {samagraError}
+                      <div className="bg-amber-50 border border-amber-300 text-amber-950 rounded-xl p-4 text-xs space-y-2.5" role="alert">
+                        <div className="flex items-start gap-2">
+                          <AlertCircle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                          <div className="space-y-1">
+                            <p className="font-bold">{samagraError}</p>
+                            {samagraPortalFallback?.details && (
+                              <p className="text-amber-900 leading-relaxed">{samagraPortalFallback.details}</p>
+                            )}
+                          </div>
+                        </div>
+                        {samagraPortalFallback && (
+                          <div className="flex flex-wrap items-center gap-3 pt-1 pl-6">
+                            <a
+                              href={samagraPortalFallback.portalUrl || SAMAGRA_PORTAL_URL}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-amber-300 text-amber-900 font-bold hover:bg-amber-100 transition"
+                            >
+                              <span>Verify directly at samagra.gov.in</span>
+                              <ExternalLink className="w-3.5 h-3.5" />
+                            </a>
+                            <button
+                              type="button"
+                              onClick={() => onNavigateTab('samagra')}
+                              className="inline-flex items-center gap-1 text-amber-900 font-bold underline hover:text-amber-700 cursor-pointer"
+                            >
+                              <span>Register / Enter Details Manually →</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {samagraNotice && !samagraError && (
+                      <div className="bg-sky-50 border border-sky-200 text-sky-900 rounded-xl px-3.5 py-2.5 text-xs">
+                        {samagraNotice}
                       </div>
                     )}
 
@@ -1231,13 +1396,13 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                       </h2>
                       <p className="text-xs text-slate-500">
                         {authMode === 'login'
-                          ? 'Sign in with your registered email and password to load your Firestore citizen profile.'
-                          : 'Create a Firebase-backed citizen account with your Samagra ID and Indore ward/block details.'}
+                          ? 'Sign in with your registered email and password to load your Citizen Dashboard profile.'
+                          : 'Create your YojanaSetu citizen account with your Samagra ID and Indore ward/block details.'}
                       </p>
                     </div>
 
                     {authMode === 'signup' && (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                      <div className="space-y-3.5">
                         <div>
                           <label className="block text-xs font-semibold text-slate-700 mb-1">
                             Full Name *
@@ -1252,22 +1417,19 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                             className="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500"
                           />
                         </div>
-                        <div>
-                          <label className="block text-xs font-semibold text-slate-700 mb-1">
-                            Mobile Number
-                          </label>
-                          <div className="relative">
-                            <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-                            <input
-                              type="tel"
-                              value={phone}
-                              onChange={e => setPhone(e.target.value)}
-                              placeholder="98260XXXXX"
-                              maxLength={20}
-                              className="w-full pl-9 pr-3.5 py-2 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono tabular-nums"
-                            />
-                          </div>
-                        </div>
+                        <MobileOtpVerifier
+                          value={phone}
+                          onChange={handlePhoneInputChange}
+                          isVerified={mobileVerified}
+                          verificationToken={mobileVerificationToken}
+                          onVerified={({ mobileNumber, verificationToken }) => {
+                            setPhone(mobileNumber);
+                            setMobileVerified(true);
+                            setMobileVerificationToken(verificationToken);
+                          }}
+                          disabled={isSubmitting}
+                          onNotify={onNotify}
+                        />
                       </div>
                     )}
 
@@ -1299,7 +1461,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                             type="text"
                             value={samagraFamilyId}
                             onChange={e => setSamagraFamilyId(e.target.value)}
-                            placeholder="8-digit ID (auto-generated if blank)"
+                            placeholder="8-digit Family ID (optional)"
                             maxLength={16}
                             className="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono tabular-nums"
                           />
@@ -1540,17 +1702,12 @@ export const AuthPage: React.FC<AuthPageProps> = ({
 
                     <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
                       {authMode === 'login' ? (
-                        <button
-                          type="button"
-                          onClick={handleForgotPassword}
-                          disabled={isSubmitting}
-                          className="text-xs font-semibold text-amber-700 hover:text-amber-900 underline cursor-pointer"
-                        >
-                          Forgot password?
-                        </button>
+                        <span className="text-xs text-slate-500">
+                          Authenticated Citizen Portal Session
+                        </span>
                       ) : (
                         <span className="text-xs text-slate-500">
-                          Stored securely via Firebase Auth & Firestore
+                          Saved securely in YojanaSetu Citizen Database
                         </span>
                       )}
 

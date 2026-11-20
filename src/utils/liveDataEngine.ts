@@ -140,24 +140,24 @@ export function evaluateSchemesRealtimeStatus(schemes: Scheme[]): SchemesRealtim
   }
 
   let verdict: SchemesRealtimeReport['verdict'] = 'baseline_unverified';
-  let verdictLabel = 'Local SQLite Catalog — External Portals Not Yet Checked';
+  let verdictLabel = 'Live Database Catalog — External Portals Not Yet Checked';
   let verdictDetail =
-    'Schemes are served live from your local SQLite database with real-time Admin sync, but official government portals have not yet been probed in this session.';
+    'Schemes are served live from the database with real-time Admin sync, but official government portals have not yet been probed in this session.';
 
   if (checkedSchemesCount > 0) {
     if (reachableSchemesCount === totalSchemes && totalSchemes > 0) {
       verdict = 'live_verified';
-      verdictLabel = 'Live SQLite Sync + All Official Portals Reachable';
-      verdictDetail = `All ${totalSchemes} schemes are live-synced in SQLite and every referenced official government portal responded to live verification.`;
+      verdictLabel = 'Live Database Sync + All Official Portals Reachable';
+      verdictDetail = `All ${totalSchemes} schemes are live-synced in the database and every referenced official government portal responded to live verification.`;
     } else if (reachableSchemesCount > 0) {
       verdict = 'partially_verified';
-      verdictLabel = `Live SQLite Sync • ${reachableSchemesCount}/${totalSchemes} Schemes Portal-Verified`;
-      verdictDetail = `${reachableSchemesCount} schemes have live reachable official portals; ${unreachableSchemesCount} portal(s) timed out or blocked automated probes. Scheme rules remain locally editable in real time via Admin.`;
+      verdictLabel = `Live Database Sync • ${reachableSchemesCount}/${totalSchemes} Schemes Portal-Verified`;
+      verdictDetail = `${reachableSchemesCount} schemes have live reachable official portals; ${unreachableSchemesCount} portal(s) timed out or blocked automated probes. Scheme rules remain editable in real time via Admin.`;
     } else {
       verdict = 'unreachable';
-      verdictLabel = 'Local SQLite Live Only — Official Portals Unreachable';
+      verdictLabel = 'Live Database Only — Official Portals Unreachable';
       verdictDetail =
-        'External government portals could not be reached from the server right now (firewall or network restriction). Schemes remain synced locally in SQLite.';
+        'External government portals could not be reached from the server right now (firewall or network restriction). Schemes remain synced in the database.';
     }
   }
 

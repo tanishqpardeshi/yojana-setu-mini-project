@@ -183,7 +183,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={onOpenSavedSchemes}
               className="inline-flex items-center space-x-1 px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-amber-50 hover:bg-amber-100 rounded-lg transition border border-amber-200 cursor-pointer whitespace-nowrap"
-              title="View Bookmarked Schemes (Stored in Firebase Firestore)"
+              title="View Bookmarked Schemes"
             >
               <Bookmark className="w-3.5 h-3.5 text-amber-600 fill-amber-500" />
               <span className="hidden sm:inline">Saved</span>

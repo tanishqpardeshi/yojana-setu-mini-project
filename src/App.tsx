@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Building2, ShieldCheck, ShieldAlert, LogOut, Loader2, Lock } from 'lucide-react';
 import {
   SupportedLanguage,
+  CitizenAccountProfile,
   CitizenProfile,
   Scheme,
   ApplicationRecord,
@@ -11,6 +12,7 @@ import {
   GovernanceLevel,
   JanpadBlock,
   DistrictStats,
+  DigiLockerCredentialRecord,
   DigiLockerDocumentRecord,
   SchemesRealtimeReport,
   VerifiedDocumentMeta,
@@ -44,6 +46,8 @@ import { CitizenEntitlementCardModal } from './components/CitizenEntitlementCard
 import { SchemeComparisonModal } from './components/SchemeComparisonModal';
 import { SavedSchemesModal } from './components/SavedSchemesModal';
 import { AuthPage } from './components/AuthPage';
+import { ToastContainer, ToastItem } from './components/ToastContainer';
+import { ApiRequestError, parseApiResponse } from './utils/apiClient';
 import {
   AdminAuthResult,
   AdminSessionInfo,
@@ -67,8 +71,30 @@ import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { collection, onSnapshot } from 'firebase/firestore';
 
 const ACTIVE_SAMAGRA_STORAGE_KEY = 'yojanasetu_live_samagra_session';
+const CITIZEN_TOKEN_STORAGE_KEY = 'yojanasetu_citizen_token';
 const PORTAL_SCOPE_STORAGE_KEY = 'yojanasetu_portal_scope';
 const MY_ARNS_STORAGE_KEY = 'yojanasetu_my_arns';
+
+function readCitizenToken(): string | null {
+  try {
+    const val = localStorage.getItem(CITIZEN_TOKEN_STORAGE_KEY);
+    return val && val.trim() ? val.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCitizenToken(token: string | null) {
+  try {
+    if (token) {
+      localStorage.setItem(CITIZEN_TOKEN_STORAGE_KEY, token);
+    } else {
+      localStorage.removeItem(CITIZEN_TOKEN_STORAGE_KEY);
+    }
+  } catch {
+    // ignore storage errors
+  }
+}
 
 function readPortalScope(): PortalScope | null {
   try {
@@ -115,9 +141,21 @@ function rememberMyArn(arn: string) {
 }
 
 function mapDigiLockerRecordsToProfileMap(
-  docs: DigiLockerDocumentRecord[]
+  docs: DigiLockerDocumentRecord[],
+  creds: DigiLockerCredentialRecord[] = []
 ): Record<string, VerifiedDocumentMeta> {
   const map: Record<string, VerifiedDocumentMeta> = {};
+  for (const c of creds) {
+    if (c.docId) {
+      map[c.docId] = {
+        verified: true,
+        source: 'digilocker',
+        docNumber: c.docNumber || c.docUri,
+        issuer: c.issuer,
+        verifiedAt: c.verifiedAt,
+      };
+    }
+  }
   for (const d of docs) {
     map[d.docId] = {
       verified: Boolean(d.verified),
@@ -142,6 +180,8 @@ export default function App() {
   // Strict separated Citizen vs Admin auth state
   const [authInitialized, setAuthInitialized] = useState(false);
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
+  const [citizenAuthToken, setCitizenAuthToken] = useState<string | null>(() => readCitizenToken());
+  const [citizenAccountUser, setCitizenAccountUser] = useState<CitizenAccountProfile | null>(null);
   const [portalScope, setPortalScope] = useState<PortalScope | null>(() => readPortalScope());
   const [adminSession, setAdminSession] = useState<AdminSessionInfo | null>(null);
   const [userProfileDoc, setUserProfileDoc] = useState<UserProfileDoc | null>(null);
@@ -157,6 +197,11 @@ export default function App() {
 
   // Clean unlinked initial citizen profile (zero demo defaults)
   const [citizenProfile, setCitizenProfile] = useState<CitizenProfile>(() => createEmptyCitizenProfile());
+  const [digiLockerCredentials, setDigiLockerCredentials] = useState<DigiLockerCredentialRecord[]>([]);
+  const [digiLockerOAuthMeta, setDigiLockerOAuthMeta] = useState<{
+    oauthConfigured: boolean;
+    redirectUri?: string;
+  }>({ oauthConfigured: false });
 
   // Public schemes catalog
   const [schemes, setSchemes] = useState<Scheme[]>([]);
@@ -173,6 +218,20 @@ export default function App() {
   const [districtStats, setDistrictStats] = useState<DistrictStats | null>(null);
 
   const [intakeScheme, setIntakeScheme] = useState<Scheme | null>(null);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  }, []);
+
+  const showToast = useCallback((toast: Omit<ToastItem, 'id'>) => {
+    const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    setToasts(prev => [...prev.slice(-3), { ...toast, id }]);
+    const duration = toast.type === 'error' || toast.type === 'warning' ? 9000 : 5500;
+    window.setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, duration);
+  }, []);
 
   const navigateTo = useCallback((targetPath: string, replace = false) => {
     const normalized = normalizePathname(targetPath);
@@ -204,10 +263,24 @@ export default function App() {
     [navigateTo]
   );
 
-  // Active Citizen Firebase session is strictly isolated from Admin sessions
+  // Active Citizen session is strictly isolated from Admin sessions
   const activeCitizenFirebaseUser = portalScope === 'admin' ? null : firebaseUser;
+  const activeCitizenAccountUser = portalScope === 'admin' ? null : citizenAccountUser;
+  const activeCitizenHeaderUser =
+    activeCitizenFirebaseUser ||
+    (activeCitizenAccountUser
+      ? {
+          uid: activeCitizenAccountUser.uid,
+          displayName: activeCitizenAccountUser.displayName,
+          email: activeCitizenAccountUser.email,
+          photoURL: null,
+        }
+      : null);
   const activeCitizenKey =
-    citizenProfile.samagraMemberId || activeCitizenFirebaseUser?.uid || null;
+    citizenProfile.samagraMemberId ||
+    activeCitizenFirebaseUser?.uid ||
+    activeCitizenAccountUser?.uid ||
+    null;
 
   const isVerifiedAdmin = Boolean(
     firebaseUser && portalScope === 'admin' && adminSession?.authenticated && adminSession.role === 'admin'
@@ -218,11 +291,11 @@ export default function App() {
     () =>
       evaluateRouteAccess(pathname, {
         authInitialized,
-        isAuthenticated: Boolean(firebaseUser),
+        isAuthenticated: Boolean(firebaseUser || citizenAccountUser || citizenAuthToken),
         portalScope,
         verifiedAdminRole: Boolean(adminSession?.authenticated && adminSession.role === 'admin'),
       }),
-    [pathname, authInitialized, firebaseUser, portalScope, adminSession]
+    [pathname, authInitialized, firebaseUser, citizenAccountUser, citizenAuthToken, portalScope, adminSession]
   );
 
   // Enforce RBAC redirects immediately whenever guard blocks a route
@@ -250,25 +323,35 @@ export default function App() {
         fetch('/api/schemes'),
         fetch('/api/schemes/realtime-status'),
       ]);
-      if (schemesRes.ok) {
-        const data = await schemesRes.json();
-        if (Array.isArray(data?.schemes)) {
-          setSchemes(data.schemes);
-          if (!statusRes.ok) {
-            setSchemesRealtimeReport(evaluateSchemesRealtimeStatus(data.schemes));
-          }
+      const schemesParsed = await parseApiResponse<{ schemes?: Scheme[] }>(schemesRes);
+      const statusParsed = await parseApiResponse<{ report?: SchemesRealtimeReport }>(statusRes);
+
+      if (schemesParsed.ok && Array.isArray(schemesParsed.data?.schemes)) {
+        setSchemes(schemesParsed.data.schemes);
+        if (!statusParsed.ok) {
+          setSchemesRealtimeReport(evaluateSchemesRealtimeStatus(schemesParsed.data.schemes));
         }
+      } else if (!schemesParsed.ok) {
+        showToast({
+          type: 'error',
+          title: 'Failed to Load Schemes Catalog',
+          message: schemesParsed.errorInfo?.error || 'Could not retrieve scheme catalog.',
+          details: schemesParsed.errorInfo?.details,
+        });
       }
-      if (statusRes.ok) {
-        const statusData = await statusRes.json();
-        if (statusData?.report) {
-          setSchemesRealtimeReport(statusData.report);
-        }
+
+      if (statusParsed.ok && statusParsed.data?.report) {
+        setSchemesRealtimeReport(statusParsed.data.report);
       }
     } catch (err) {
-      console.warn('Could not load live schemes:', err);
+      showToast({
+        type: 'error',
+        title: 'Network Error',
+        message: 'Unable to load schemes catalog from the server.',
+        details: err instanceof Error ? err.message : undefined,
+      });
     }
-  }, []);
+  }, [showToast]);
 
   // Citizen-scoped applications loader (never hits unfiltered admin endpoints)
   const fetchCitizenScopedApplications = useCallback(async () => {
@@ -281,12 +364,10 @@ export default function App() {
         const res = await fetch(
           `/api/applications?samagraId=${encodeURIComponent(samagraLookupId)}`
         );
-        if (res.ok) {
-          const data = await res.json();
-          if (Array.isArray(data?.records)) {
-            for (const rec of data.records as ApplicationRecord[]) {
-              collected.set(rec.arn, rec);
-            }
+        const parsed = await parseApiResponse<{ records?: ApplicationRecord[] }>(res);
+        if (parsed.ok && Array.isArray(parsed.data?.records)) {
+          for (const rec of parsed.data.records) {
+            collected.set(rec.arn, rec);
           }
         }
       }
@@ -348,52 +429,84 @@ export default function App() {
         return;
       }
 
-      if (appsRes.ok) {
-        const appsData = await appsRes.json();
-        if (Array.isArray(appsData?.records)) {
-          setAdminApplications(appsData.records);
-        }
+      const [appsParsed, statsParsed, famParsed, notifParsed] = await Promise.all([
+        parseApiResponse<{ records?: ApplicationRecord[] }>(appsRes),
+        parseApiResponse<{ stats?: DistrictStats }>(statsRes),
+        parseApiResponse<{ families?: SamagraFamily[] }>(famRes),
+        parseApiResponse<{ notifications?: LiveNotification[] }>(notifRes),
+      ]);
+
+      if (appsParsed.ok && Array.isArray(appsParsed.data?.records)) {
+        setAdminApplications(appsParsed.data.records);
+      } else if (!appsParsed.ok) {
+        showToast({
+          type: 'error',
+          title: 'Admin Queue Error',
+          message: appsParsed.errorInfo?.error || 'Failed to load district applications.',
+          details: appsParsed.errorInfo?.details,
+        });
       }
-      if (statsRes.ok) {
-        const statsData = await statsRes.json();
-        if (statsData?.stats) {
-          setDistrictStats(statsData.stats);
-        }
+
+      if (statsParsed.ok && statsParsed.data?.stats) {
+        setDistrictStats(statsParsed.data.stats);
       }
-      if (famRes.ok) {
-        const famData = await famRes.json();
-        if (Array.isArray(famData?.families)) {
-          setAdminSamagraFamilies(famData.families);
-        }
+      if (famParsed.ok && Array.isArray(famParsed.data?.families)) {
+        setAdminSamagraFamilies(famParsed.data.families);
       }
-      if (notifRes.ok) {
-        const notifData = await notifRes.json();
-        if (Array.isArray(notifData?.notifications)) {
-          setAdminNotifications(notifData.notifications);
-        }
+      if (notifParsed.ok && Array.isArray(notifParsed.data?.notifications)) {
+        setAdminNotifications(notifParsed.data.notifications);
       }
     } catch (err) {
-      console.warn('Could not load protected admin datasets:', err);
+      showToast({
+        type: 'error',
+        title: 'Admin Telemetry Error',
+        message: 'Unable to load protected admin datasets.',
+        details: err instanceof Error ? err.message : undefined,
+      });
     }
-  }, [isVerifiedAdmin, navigateTo]);
+  }, [isVerifiedAdmin, navigateTo, showToast]);
 
-  const syncCitizenDigiLockerWallet = useCallback(async (citizenKey: string) => {
-    try {
-      const res = await fetch(`/api/digilocker/${encodeURIComponent(citizenKey)}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data?.documents)) {
-          const verifiedMap = mapDigiLockerRecordsToProfileMap(data.documents);
+  const syncCitizenDigiLockerWallet = useCallback(
+    async (citizenKey: string) => {
+      try {
+        const res = await fetch(`/api/digilocker/${encodeURIComponent(citizenKey)}`);
+        const parsed = await parseApiResponse<{
+          documents?: DigiLockerDocumentRecord[];
+          credentials?: DigiLockerCredentialRecord[];
+          oauthConfigured?: boolean;
+          redirectUri?: string;
+        }>(res);
+        if (parsed.ok && Array.isArray(parsed.data?.documents)) {
+          const creds = Array.isArray(parsed.data.credentials) ? parsed.data.credentials : [];
+          const verifiedMap = mapDigiLockerRecordsToProfileMap(parsed.data.documents, creds);
+          setDigiLockerCredentials(creds);
+          setDigiLockerOAuthMeta({
+            oauthConfigured: Boolean(parsed.data.oauthConfigured),
+            redirectUri: parsed.data.redirectUri,
+          });
           setCitizenProfile(prev => ({
             ...prev,
             verifiedDocuments: verifiedMap,
           }));
+        } else if (!parsed.ok) {
+          showToast({
+            type: 'error',
+            title: 'DigiLocker Sync Failed',
+            message: parsed.errorInfo?.error || 'Could not load DigiLocker wallet.',
+            details: parsed.errorInfo?.details,
+          });
         }
+      } catch (err) {
+        showToast({
+          type: 'error',
+          title: 'DigiLocker Connection Error',
+          message: 'Unable to sync DigiLocker wallet with backend.',
+          details: err instanceof Error ? err.message : undefined,
+        });
       }
-    } catch (err) {
-      console.warn('Could not sync DigiLocker wallet:', err);
-    }
-  }, []);
+    },
+    [showToast]
+  );
 
   const buildProfileFromSamagraMember = useCallback(
     (member: FamilyMember, family: SamagraFamily): CitizenProfile => {
@@ -433,9 +546,36 @@ export default function App() {
     []
   );
 
-  // Initial public schemes load & Citizen Samagra session restore
+  // Initial public schemes load, Citizen Email/Password DB session restore, & Samagra restore
   useEffect(() => {
     fetchLiveSchemes();
+
+    const storedToken = readCitizenToken();
+    const storedScope = readPortalScope();
+    if (storedToken && storedScope !== 'admin') {
+      fetch('/api/citizen/auth/me', {
+        headers: { Authorization: `Bearer ${storedToken}` },
+      })
+        .then(r => (r.ok ? r.json() : null))
+        .then(data => {
+          if (data?.authenticated && data?.profile) {
+            const acct = data.profile as CitizenAccountProfile;
+            setCitizenAuthToken(storedToken);
+            setCitizenAccountUser(acct);
+            writePortalScope('citizen');
+            setPortalScope('citizen');
+            setCitizenProfile(prev => mapUserProfileToCitizenProfile(acct, prev));
+            if (acct.samagraMemberId || acct.uid) {
+              syncCitizenDigiLockerWallet(acct.samagraMemberId || acct.uid);
+            }
+          } else {
+            writeCitizenToken(null);
+            setCitizenAuthToken(null);
+            setCitizenAccountUser(null);
+          }
+        })
+        .catch(() => {});
+    }
 
     try {
       const savedRaw = localStorage.getItem(ACTIVE_SAMAGRA_STORAGE_KEY);
@@ -476,12 +616,14 @@ export default function App() {
     }
   }, [isVerifiedAdmin, pathname, fetchAdminDistrictData]);
 
-  // Sync DigiLocker whenever activeCitizenKey changes
+  // Sync DigiLocker whenever activeCitizenKey or DigiLocker tab is active
   useEffect(() => {
     if (activeCitizenKey) {
       syncCitizenDigiLockerWallet(activeCitizenKey);
+    } else if (activeTab === 'digilocker') {
+      syncCitizenDigiLockerWallet('citizen_oauth');
     }
-  }, [activeCitizenKey, syncCitizenDigiLockerWallet]);
+  }, [activeCitizenKey, activeTab, syncCitizenDigiLockerWallet]);
 
   // Subscribe to non-PII live SSE signals from server
   useEffect(() => {
@@ -529,13 +671,18 @@ export default function App() {
       if (!user) {
         setUserProfileDoc(null);
         setAdminSession(null);
-        setSavedSchemes([]);
         setAdminApplications([]);
         setAdminNotifications([]);
         setAdminSamagraFamilies([]);
         setDistrictStats(null);
-        writePortalScope(null);
-        setPortalScope(null);
+        if (readCitizenToken()) {
+          writePortalScope('citizen');
+          setPortalScope('citizen');
+        } else {
+          setSavedSchemes([]);
+          writePortalScope(null);
+          setPortalScope(null);
+        }
         setAuthInitialized(true);
         return;
       }
@@ -596,35 +743,50 @@ export default function App() {
     };
   }, []);
 
-  // Firestore Real-Time Saved Schemes Listener (Citizen scope only)
+  // Saved Schemes Listener (Firestore for Google citizens, Backend DB for Email/Password citizens)
   useEffect(() => {
-    if (!activeCitizenFirebaseUser) {
-      setSavedSchemes([]);
+    if (activeCitizenFirebaseUser) {
+      const savedPath = `users/${activeCitizenFirebaseUser.uid}/savedSchemes`;
+      const savedSchemesCol = collection(db, 'users', activeCitizenFirebaseUser.uid, 'savedSchemes');
+      const unsubscribeSaved = onSnapshot(
+        savedSchemesCol,
+        snapshot => {
+          const items = snapshot.docs.map(docSnap => ({
+            schemeId: docSnap.id,
+            schemeTitle: (docSnap.data().schemeTitle as string) || docSnap.id,
+            savedAt: (docSnap.data().savedAt as string) || new Date().toISOString(),
+          }));
+          setSavedSchemes(items);
+        },
+        err => {
+          handleFirestoreError(err, OperationType.LIST, savedPath);
+        }
+      );
+      return () => unsubscribeSaved();
+    }
+
+    if (activeCitizenAccountUser && citizenAuthToken) {
+      fetch('/api/citizen/saved-schemes', {
+        headers: { Authorization: `Bearer ${citizenAuthToken}` },
+      })
+        .then(r => (r.ok ? r.json() : null))
+        .then(data => {
+          if (Array.isArray(data?.items)) {
+            setSavedSchemes(data.items);
+          }
+        })
+        .catch(() => {});
       return;
     }
 
-    const savedPath = `users/${activeCitizenFirebaseUser.uid}/savedSchemes`;
-    const savedSchemesCol = collection(db, 'users', activeCitizenFirebaseUser.uid, 'savedSchemes');
-    const unsubscribeSaved = onSnapshot(
-      savedSchemesCol,
-      snapshot => {
-        const items = snapshot.docs.map(docSnap => ({
-          schemeId: docSnap.id,
-          schemeTitle: (docSnap.data().schemeTitle as string) || docSnap.id,
-          savedAt: (docSnap.data().savedAt as string) || new Date().toISOString(),
-        }));
-        setSavedSchemes(items);
-      },
-      err => {
-        handleFirestoreError(err, OperationType.LIST, savedPath);
-      }
-    );
+    setSavedSchemes([]);
+  }, [activeCitizenFirebaseUser, activeCitizenAccountUser, citizenAuthToken]);
 
-    return () => unsubscribeSaved();
-  }, [activeCitizenFirebaseUser]);
-
-  // Citizen Auth Success Handler (strictly Citizen role & Citizen Dashboard)
+  // Citizen Google Auth Success Handler (strictly Citizen role & Citizen Dashboard)
   const handleCitizenAuthSuccess = (result: AuthResult) => {
+    writeCitizenToken(null);
+    setCitizenAuthToken(null);
+    setCitizenAccountUser(null);
     writePortalScope('citizen');
     setPortalScope('citizen');
     setAdminSession(null);
@@ -634,10 +796,41 @@ export default function App() {
     setCitizenProfile(prev => mapUserProfileToCitizenProfile(citizenDoc, prev));
     setAuthBannerMessage(null);
     setCitizenSecurityBanner(null);
+    navigateTo(CITIZEN_DEFAULT_ROUTE);
+  };
+
+  // Citizen Email/Password Auth Success Handler (PostgreSQL / SQLite backed, Citizen role only)
+  const handleCitizenEmailAuthSuccess = (token: string, profile: CitizenAccountProfile) => {
+    writeCitizenToken(token);
+    setCitizenAuthToken(token);
+    setCitizenAccountUser(profile);
+    writePortalScope('citizen');
+    setPortalScope('citizen');
+    setAdminSession(null);
+    setCitizenProfile(prev => mapUserProfileToCitizenProfile(profile, prev));
+    if (profile.samagraFamilyId && profile.samagraMemberId) {
+      try {
+        localStorage.setItem(
+          ACTIVE_SAMAGRA_STORAGE_KEY,
+          JSON.stringify({ familyId: profile.samagraFamilyId, memberId: profile.samagraMemberId })
+        );
+      } catch {
+        // ignore storage errors
+      }
+    }
+    if (profile.samagraMemberId || profile.uid) {
+      syncCitizenDigiLockerWallet(profile.samagraMemberId || profile.uid);
+    }
+    setAuthBannerMessage(null);
+    setCitizenSecurityBanner(null);
+    navigateTo(CITIZEN_DEFAULT_ROUTE);
   };
 
   // Dedicated Admin Auth Success Handler (strictly verified Admin session -> /admin)
   const handleAdminAuthenticated = (result: AdminAuthResult) => {
+    writeCitizenToken(null);
+    setCitizenAuthToken(null);
+    setCitizenAccountUser(null);
     writePortalScope('admin');
     setPortalScope('admin');
     setFirebaseUser(result.user);
@@ -649,6 +842,27 @@ export default function App() {
   };
 
   const handleUpdateCitizenProfileInCloud = async (updates: Partial<UserProfileDoc>) => {
+    if (activeCitizenAccountUser && citizenAuthToken) {
+      const res = await fetch('/api/citizen/auth/profile', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${citizenAuthToken}`,
+        },
+        body: JSON.stringify(updates),
+      });
+      const parsed = await parseApiResponse<{ profile?: CitizenAccountProfile }>(res);
+      if (!parsed.ok || !parsed.data?.profile) {
+        throw new ApiRequestError(
+          parsed.errorInfo || { status: parsed.status, error: 'Failed to update citizen profile.' }
+        );
+      }
+      const updatedAccount = parsed.data.profile;
+      setCitizenAccountUser(updatedAccount);
+      setCitizenProfile(prev => mapUserProfileToCitizenProfile(updatedAccount, prev));
+      return;
+    }
+
     if (!activeCitizenFirebaseUser) return;
     const updatedDoc = await updateCitizenProfileInFirestore(activeCitizenFirebaseUser.uid, updates);
     const citizenDoc: UserProfileDoc = { ...updatedDoc, role: 'citizen' };
@@ -658,11 +872,17 @@ export default function App() {
 
   const handleCitizenSignOut = async () => {
     try {
-      await logOutUser();
+      writeCitizenToken(null);
+      setCitizenAuthToken(null);
+      setCitizenAccountUser(null);
+      if (firebaseUser) {
+        await logOutUser();
+      }
       writePortalScope(null);
       setPortalScope(null);
       setUserProfileDoc(null);
       setAdminSession(null);
+      setSavedSchemes([]);
       setAuthBannerMessage(null);
     } catch (err) {
       console.error('Citizen Sign-Out failed:', err);
@@ -687,25 +907,92 @@ export default function App() {
   };
 
   const handleToggleSaveScheme = async (scheme: Scheme) => {
-    if (!activeCitizenFirebaseUser) {
-      setAuthBannerMessage(
-        `Sign in or register as a citizen to bookmark "${scheme.title}" to your cloud profile.`
-      );
-      handleSelectCitizenTab('auth');
+    if (activeCitizenFirebaseUser) {
+      try {
+        const isAlreadySaved = savedSchemes.some(s => s.schemeId === scheme.id);
+        if (isAlreadySaved) {
+          await removeSavedSchemeFromUserFirestore(activeCitizenFirebaseUser.uid, scheme.id);
+          showToast({
+            type: 'info',
+            title: 'Bookmark Removed',
+            message: `Removed "${scheme.title}" from your saved schemes.`,
+          });
+        } else {
+          await saveSchemeToUserFirestore(activeCitizenFirebaseUser.uid, scheme.id, scheme.title);
+          showToast({
+            type: 'success',
+            title: 'Scheme Saved',
+            message: `Bookmarked "${scheme.title}" to your citizen profile.`,
+          });
+        }
+      } catch (err) {
+        const msg =
+          err instanceof Error
+            ? err.message
+            : 'Could not update saved scheme in cloud storage. Please try again.';
+        setAuthBannerMessage(msg);
+        showToast({ type: 'error', title: 'Bookmark Update Failed', message: msg });
+      }
       return;
     }
 
-    try {
-      const isAlreadySaved = savedSchemes.some(s => s.schemeId === scheme.id);
-      if (isAlreadySaved) {
-        await removeSavedSchemeFromUserFirestore(activeCitizenFirebaseUser.uid, scheme.id);
-      } else {
-        await saveSchemeToUserFirestore(activeCitizenFirebaseUser.uid, scheme.id, scheme.title);
+    if (activeCitizenAccountUser && citizenAuthToken) {
+      try {
+        const isAlreadySaved = savedSchemes.some(s => s.schemeId === scheme.id);
+        const res = isAlreadySaved
+          ? await fetch(`/api/citizen/saved-schemes/${encodeURIComponent(scheme.id)}`, {
+              method: 'DELETE',
+              headers: { Authorization: `Bearer ${citizenAuthToken}` },
+            })
+          : await fetch('/api/citizen/saved-schemes', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${citizenAuthToken}`,
+              },
+              body: JSON.stringify({ schemeId: scheme.id, schemeTitle: scheme.title }),
+            });
+        const parsed = await parseApiResponse<{
+          items?: Array<{ schemeId: string; schemeTitle: string; savedAt: string }>;
+        }>(res);
+        if (!parsed.ok) {
+          const errMsg = parsed.errorInfo?.error || 'Could not update saved scheme.';
+          setAuthBannerMessage(errMsg);
+          showToast({
+            type: 'error',
+            title: 'Bookmark Update Failed',
+            message: errMsg,
+            details: parsed.errorInfo?.details,
+          });
+          return;
+        }
+        if (Array.isArray(parsed.data?.items)) {
+          setSavedSchemes(parsed.data.items);
+          showToast({
+            type: isAlreadySaved ? 'info' : 'success',
+            title: isAlreadySaved ? 'Bookmark Removed' : 'Scheme Saved',
+            message: isAlreadySaved
+              ? `Removed "${scheme.title}" from saved schemes.`
+              : `Bookmarked "${scheme.title}" to your citizen account.`,
+          });
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Could not update saved scheme.';
+        setAuthBannerMessage(msg);
+        showToast({ type: 'error', title: 'Bookmark Error', message: msg });
       }
-    } catch (err) {
-      console.error('Failed to update saved scheme in Firestore:', err);
-      setAuthBannerMessage('Could not update saved scheme in cloud storage. Please try again.');
+      return;
     }
+
+    setAuthBannerMessage(
+      `Sign in or register as a citizen to bookmark "${scheme.title}" to your profile.`
+    );
+    showToast({
+      type: 'info',
+      title: 'Sign In Required',
+      message: `Please sign in to bookmark "${scheme.title}".`,
+    });
+    handleSelectCitizenTab('auth');
   };
 
   // Run live server-side verification against official scheme portals
@@ -713,17 +1000,37 @@ export default function App() {
     setIsCheckingRealtime(true);
     try {
       const res = await fetch('/api/schemes/verify-realtime', { method: 'POST' });
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data?.schemes)) {
-          setSchemes(data.schemes);
-        }
-        if (data?.report) {
-          setSchemesRealtimeReport(data.report);
-        }
+      const parsed = await parseApiResponse<{
+        schemes?: Scheme[];
+        report?: SchemesRealtimeReport;
+      }>(res);
+      if (!parsed.ok) {
+        showToast({
+          type: 'error',
+          title: 'Portal Reachability Check Failed',
+          message: parsed.errorInfo?.error || 'Failed to verify official scheme portals.',
+          details: parsed.errorInfo?.details,
+        });
+        return;
+      }
+      if (Array.isArray(parsed.data?.schemes)) {
+        setSchemes(parsed.data.schemes);
+      }
+      if (parsed.data?.report) {
+        setSchemesRealtimeReport(parsed.data.report);
+        showToast({
+          type: 'success',
+          title: 'Official Portal Audit Complete',
+          message: `${parsed.data.report.reachableSchemesCount}/${parsed.data.report.totalSchemes} schemes reachable across official portals.`,
+        });
       }
     } catch (err) {
-      console.warn('Live schemes portal check failed:', err);
+      showToast({
+        type: 'error',
+        title: 'Portal Check Network Error',
+        message: 'Could not reach server to probe official scheme portals.',
+        details: err instanceof Error ? err.message : undefined,
+      });
     } finally {
       setIsCheckingRealtime(false);
     }
@@ -733,63 +1040,59 @@ export default function App() {
   const handleCreateLiveScheme = async (
     schemePayload: Partial<Scheme> & { id: string; title: string }
   ): Promise<boolean> => {
-    if (!isVerifiedAdmin) return false;
-    try {
-      const authHeaders = await getAuthBearerHeader(false);
-      const res = await fetch('/api/schemes', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...authHeaders,
-        },
-        body: JSON.stringify(schemePayload),
+    if (!isVerifiedAdmin) {
+      showToast({
+        type: 'error',
+        title: 'Admin Authorization Required',
+        message: 'Only verified administrators can publish schemes.',
       });
-      if (!res.ok) return false;
-      await fetchLiveSchemes();
-      await fetchAdminDistrictData();
-      return true;
-    } catch {
-      return false;
+      throw new ApiRequestError({
+        status: 403,
+        error: 'Only verified administrators can publish schemes.',
+      });
     }
+    const authHeaders = await getAuthBearerHeader(false);
+    const res = await fetch('/api/schemes', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders,
+      },
+      body: JSON.stringify(schemePayload),
+    });
+    const parsed = await parseApiResponse<{ scheme?: Scheme }>(res);
+    if (!parsed.ok) {
+      showToast({
+        type: 'error',
+        title: 'Publish Scheme Failed',
+        message: parsed.errorInfo?.error || 'Failed to save new scheme.',
+        details: parsed.errorInfo?.details,
+      });
+      throw new ApiRequestError(
+        parsed.errorInfo || { status: parsed.status, error: 'Failed to save new scheme.' }
+      );
+    }
+    await fetchLiveSchemes();
+    await fetchAdminDistrictData();
+    showToast({
+      type: 'success',
+      title: 'Live Scheme Published',
+      message: `"${schemePayload.title}" is now live in Citizen Discovery.`,
+    });
+    return true;
   };
 
-  // Live DigiLocker Quick Verify (from Citizen Eligibility Calculator)
-  const handleQuickVerifyDocument = async (docId: string, issuer: string): Promise<boolean> => {
-    if (!activeCitizenKey) return false;
-    try {
-      const res = await fetch('/api/digilocker/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          citizenKey: activeCitizenKey,
-          docId,
-          issuer,
-          source: docId.startsWith('samagra') || docId === 'khasra_b1' ? 'mp_edistrict' : 'digilocker',
-          wardOrBlock:
-            citizenProfile.areaType === 'urban'
-              ? `Ward ${citizenProfile.wardNumber || 1} (Indore IMC)`
-              : `${citizenProfile.blockName || 'Indore'} Janpad`,
-        }),
-      });
-      if (!res.ok) return false;
-      const data = await res.json();
-      if (Array.isArray(data?.documents)) {
-        setCitizenProfile(prev => ({
-          ...prev,
-          verifiedDocuments: mapDigiLockerRecordsToProfileMap(data.documents),
-        }));
-        return true;
-      }
-      return false;
-    } catch {
-      return false;
+  const handleSyncDocumentsFromServer = (
+    docs: DigiLockerDocumentRecord[],
+    credentials?: DigiLockerCredentialRecord[]
+  ) => {
+    const nextCreds = Array.isArray(credentials) ? credentials : digiLockerCredentials;
+    if (Array.isArray(credentials)) {
+      setDigiLockerCredentials(credentials);
     }
-  };
-
-  const handleSyncDocumentsFromServer = (docs: DigiLockerDocumentRecord[]) => {
     setCitizenProfile(prev => ({
       ...prev,
-      verifiedDocuments: mapDigiLockerRecordsToProfileMap(docs),
+      verifiedDocuments: mapDigiLockerRecordsToProfileMap(docs, nextCreds),
     }));
   };
 
@@ -807,7 +1110,7 @@ export default function App() {
     }
     syncCitizenDigiLockerWallet(member.memberId);
 
-    if (activeCitizenFirebaseUser) {
+    if (activeCitizenFirebaseUser || (activeCitizenAccountUser && citizenAuthToken)) {
       handleUpdateCitizenProfileInCloud({
         displayName: nextProfile.fullName,
         samagraFamilyId: family.familyId,
@@ -824,7 +1127,16 @@ export default function App() {
         isBPL: nextProfile.isBPL,
         maritalStatus: nextProfile.maritalStatus,
         ekycVerified: member.ekycStatus,
-      }).catch(err => console.warn('Firestore Samagra link sync warning:', err));
+      }).catch(err => {
+        showToast({
+          type: 'warning',
+          title: 'Account Link Warning',
+          message:
+            err instanceof Error
+              ? err.message
+              : 'Could not link Samagra ID to your citizen account.',
+        });
+      });
     }
     handleSelectCitizenTab('schemes');
   };
@@ -841,7 +1153,7 @@ export default function App() {
       // ignore
     }
     await syncCitizenDigiLockerWallet(member.memberId);
-    if (activeCitizenFirebaseUser) {
+    if (activeCitizenFirebaseUser || (activeCitizenAccountUser && citizenAuthToken)) {
       await handleUpdateCitizenProfileInCloud({
         displayName: nextProfile.fullName,
         samagraFamilyId: family.familyId,
@@ -862,7 +1174,7 @@ export default function App() {
     }
   };
 
-  // Submit live application to SQLite + Firestore (Citizen action)
+  // Submit live application to PostgreSQL / SQLite + Firestore (Citizen action)
   const handleApplicationSubmit = async (appData: {
     schemeId: string;
     applicantName: string;
@@ -871,46 +1183,62 @@ export default function App() {
     phone: string;
     wardOrBlock: string;
     areaType: 'urban' | 'rural';
-  }) => {
-    try {
-      const res = await fetch('/api/applications', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(appData),
+  }): Promise<void> => {
+    const citizenId =
+      activeCitizenAccountUser?.uid || activeCitizenFirebaseUser?.uid || appData.samagraMemberId;
+    const res = await fetch('/api/applications', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...appData,
+        citizenId,
+      }),
+    });
+
+    const parsed = await parseApiResponse<{ record?: ApplicationRecord }>(res);
+    if (!parsed.ok || !parsed.data?.record) {
+      const errorInfo = parsed.errorInfo || {
+        status: parsed.status,
+        error: `Application intake failed with status ${parsed.status}.`,
+      };
+      showToast({
+        type: 'error',
+        title:
+          parsed.status === 409 ? 'Duplicate Application Blocked' : 'Application Submission Failed',
+        message: errorInfo.error,
+        details: errorInfo.details,
       });
-
-      if (!res.ok) {
-        throw new Error(`Application intake failed with status ${res.status}`);
-      }
-
-      const data = await res.json();
-      if (data.record) {
-        rememberMyArn(data.record.arn);
-        setCitizenApplications(prev => [
-          data.record,
-          ...prev.filter(a => a.arn !== data.record.arn),
-        ]);
-
-        if (activeCitizenFirebaseUser) {
-          const targetScheme = schemes.find(s => s.id === appData.schemeId);
-          saveApplicationToFirestore({
-            arn: data.record.arn,
-            schemeId: appData.schemeId,
-            schemeName: targetScheme ? targetScheme.title : data.record.schemeTitle,
-            applicantName: appData.applicantName,
-            applicantUid: activeCitizenFirebaseUser.uid,
-            samagraId: appData.samagraMemberId,
-            wardNumber: appData.areaType === 'urban' ? citizenProfile.wardNumber : undefined,
-            status: 'Submitted',
-            appliedAt: new Date().toISOString(),
-            amountEstimated: targetScheme?.financialEntitlement?.amount || 0,
-          }).catch(err => console.warn('Firestore app sync warning:', err));
-        }
-      }
-    } catch (e) {
-      console.error('Live application submission failed:', e);
+      throw new ApiRequestError(errorInfo);
     }
 
+    const createdRecord = parsed.data.record;
+    rememberMyArn(createdRecord.arn);
+    setCitizenApplications(prev => [
+      createdRecord,
+      ...prev.filter(a => a.arn !== createdRecord.arn),
+    ]);
+
+    if (activeCitizenFirebaseUser) {
+      const targetScheme = schemes.find(s => s.id === appData.schemeId);
+      saveApplicationToFirestore({
+        arn: createdRecord.arn,
+        schemeId: appData.schemeId,
+        schemeName: targetScheme ? targetScheme.title : createdRecord.schemeTitle,
+        applicantName: appData.applicantName,
+        applicantUid: activeCitizenFirebaseUser.uid,
+        samagraId: appData.samagraMemberId,
+        wardNumber: appData.areaType === 'urban' ? citizenProfile.wardNumber : undefined,
+        status: 'Submitted',
+        appliedAt: new Date().toISOString(),
+        amountEstimated: targetScheme?.financialEntitlement?.amount || 0,
+      }).catch(err => console.warn('Firestore app sync warning:', err));
+    }
+
+    showToast({
+      type: 'success',
+      title: 'Application Submitted',
+      message: `Generated ARN ${createdRecord.arn} for ${createdRecord.schemeTitle}.`,
+    });
     setIntakeScheme(null);
     handleSelectCitizenTab('tracker');
   };
@@ -921,29 +1249,42 @@ export default function App() {
     status: ApplicationRecord['currentStatus'],
     remarks?: string
   ) => {
-    if (!isVerifiedAdmin) return;
-    try {
-      const authHeaders = await getAuthBearerHeader(false);
-      const res = await fetch(`/api/applications/${encodeURIComponent(arn)}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          ...authHeaders,
-        },
-        body: JSON.stringify({ status, remarks }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.record) {
-          setAdminApplications(prev =>
-            prev.map(a => (a.arn === data.record.arn ? data.record : a))
-          );
-          fetchAdminDistrictData();
-        }
-      }
-    } catch (err) {
-      console.error('Admin application status update failed:', err);
+    if (!isVerifiedAdmin) {
+      throw new ApiRequestError({ status: 403, error: 'Administrator session is required.' });
     }
+    const authHeaders = await getAuthBearerHeader(false);
+    const res = await fetch(`/api/applications/${encodeURIComponent(arn)}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders,
+      },
+      body: JSON.stringify({ status, remarks }),
+    });
+    const parsed = await parseApiResponse<{ record?: ApplicationRecord }>(res);
+    if (!parsed.ok || !parsed.data?.record) {
+      const errorInfo = parsed.errorInfo || {
+        status: parsed.status,
+        error: 'Failed to update application status.',
+      };
+      showToast({
+        type: 'error',
+        title: 'Status Update Failed',
+        message: errorInfo.error,
+        details: errorInfo.details,
+      });
+      throw new ApiRequestError(errorInfo);
+    }
+
+    setAdminApplications(prev =>
+      prev.map(a => (a.arn === parsed.data!.record!.arn ? parsed.data!.record! : a))
+    );
+    showToast({
+      type: 'success',
+      title: 'Application Status Updated',
+      message: `ARN ${parsed.data.record.arn} moved to ${status.replace(/_/g, ' ').toUpperCase()}.`,
+    });
+    fetchAdminDistrictData();
   };
 
   // Broadcast notification from admin (strictly authenticated with Admin Bearer token)
@@ -952,24 +1293,40 @@ export default function App() {
     message: string;
     wardOrBlock: string;
     amount?: number;
-  }) => {
-    if (!isVerifiedAdmin) return;
-    try {
-      const authHeaders = await getAuthBearerHeader(false);
-      const res = await fetch('/api/notifications', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...authHeaders,
-        },
-        body: JSON.stringify(notifData),
-      });
-      if (res.ok) {
-        fetchAdminDistrictData();
-      }
-    } catch (e) {
-      console.warn('Broadcast API call failed:', e);
+  }): Promise<void> => {
+    if (!isVerifiedAdmin) {
+      throw new ApiRequestError({ status: 403, error: 'Administrator session is required.' });
     }
+    const authHeaders = await getAuthBearerHeader(false);
+    const res = await fetch('/api/notifications', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders,
+      },
+      body: JSON.stringify(notifData),
+    });
+    const parsed = await parseApiResponse<{ notification?: LiveNotification }>(res);
+    if (!parsed.ok) {
+      const errorInfo = parsed.errorInfo || {
+        status: parsed.status,
+        error: 'Failed to broadcast administrative alert.',
+      };
+      showToast({
+        type: 'error',
+        title: 'Broadcast Failed',
+        message: errorInfo.error,
+        details: errorInfo.details,
+      });
+      throw new ApiRequestError(errorInfo);
+    }
+
+    showToast({
+      type: 'success',
+      title: 'Live Alert Broadcasted',
+      message: `Sent administrative notice to ${notifData.wardOrBlock}.`,
+    });
+    fetchAdminDistrictData();
   };
 
   // Filter schemes according to active search query & selected governance level
@@ -983,14 +1340,18 @@ export default function App() {
   // ================= DEDICATED ADMIN LOGIN ROUTE (/admin/login) =================
   if (isAdminLoginPath(pathname)) {
     return (
-      <AdminLoginPage
-        onAdminAuthenticated={handleAdminAuthenticated}
-        onReturnToCitizenPortal={() => {
-          setAdminRedirectNotice(null);
-          navigateTo(CITIZEN_DEFAULT_ROUTE);
-        }}
-        redirectNotice={adminRedirectNotice}
-      />
+      <>
+        <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+        <AdminLoginPage
+          onAdminAuthenticated={handleAdminAuthenticated}
+          onReturnToCitizenPortal={() => {
+            setAdminRedirectNotice(null);
+            navigateTo(CITIZEN_DEFAULT_ROUTE);
+          }}
+          redirectNotice={adminRedirectNotice}
+          onNotify={showToast}
+        />
+      </>
     );
   }
 
@@ -1009,6 +1370,7 @@ export default function App() {
 
     return (
       <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-heading">
+        <ToastContainer toasts={toasts} onDismiss={dismissToast} />
         {/* Dedicated Isolated Admin Top Bar (No Citizen Navigation) */}
         <header className="sticky top-0 z-40 bg-slate-950 text-white border-b border-slate-800 shadow-sm">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex flex-wrap items-center justify-between gap-3">
@@ -1075,6 +1437,7 @@ export default function App() {
   // ================= PUBLIC / CITIZEN PORTAL =================
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-heading">
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       {/* Citizen-Only Header (Zero Admin Mode Switcher or Admin Links) */}
       <Header
         currentLanguage={currentLanguage}
@@ -1082,7 +1445,7 @@ export default function App() {
         onOpenSamagraModal={() => handleSelectCitizenTab('samagra')}
         activeTab={activeTab}
         setActiveTab={handleSelectCitizenTab}
-        firebaseUser={activeCitizenFirebaseUser}
+        firebaseUser={activeCitizenHeaderUser}
         onSignOut={handleCitizenSignOut}
         savedSchemesCount={savedSchemes.length}
         onOpenSavedSchemes={() => setIsSavedSchemesOpen(true)}
@@ -1139,7 +1502,6 @@ export default function App() {
                 profile={citizenProfile}
                 setProfile={setCitizenProfile}
                 citizenKey={activeCitizenKey}
-                onQuickVerifyDocument={handleQuickVerifyDocument}
                 onApplyScheme={scheme => setIntakeScheme(scheme)}
                 onNavigateToDigilocker={() => handleSelectCitizenTab('digilocker')}
                 onNavigateToSamagra={() => handleSelectCitizenTab('samagra')}
@@ -1172,6 +1534,7 @@ export default function App() {
             activeMemberId={citizenProfile.samagraMemberId}
             onSelectMemberForProfile={handleSelectMemberForProfile}
             onFamiliesChanged={fetchCitizenScopedApplications}
+            onNotify={showToast}
           />
         )}
 
@@ -1180,8 +1543,14 @@ export default function App() {
             currentLanguage={currentLanguage}
             profile={citizenProfile}
             citizenKey={activeCitizenKey}
+            credentials={digiLockerCredentials}
+            oauthMeta={digiLockerOAuthMeta}
             onSyncDocumentsFromServer={handleSyncDocumentsFromServer}
+            onRefreshWallet={() =>
+              syncCitizenDigiLockerWallet(activeCitizenKey || 'citizen_oauth')
+            }
             onNavigateToSamagra={() => handleSelectCitizenTab('samagra')}
+            onNotify={showToast}
           />
         )}
 
@@ -1190,6 +1559,7 @@ export default function App() {
             currentLanguage={currentLanguage}
             applications={citizenApplications}
             onNavigateToSchemes={() => handleSelectCitizenTab('schemes')}
+            onNotify={showToast}
           />
         )}
 
@@ -1197,9 +1567,12 @@ export default function App() {
           <AuthPage
             currentLanguage={currentLanguage}
             firebaseUser={activeCitizenFirebaseUser}
+            citizenAccountUser={activeCitizenAccountUser}
+            citizenAuthToken={citizenAuthToken}
             userProfileDoc={userProfileDoc}
             citizenProfile={citizenProfile}
             onAuthSuccess={handleCitizenAuthSuccess}
+            onEmailAuthSuccess={handleCitizenEmailAuthSuccess}
             onSamagraSessionLogin={handleSamagraSessionLogin}
             onUpdateCitizenProfile={handleUpdateCitizenProfileInCloud}
             onSignOut={handleCitizenSignOut}
@@ -1207,6 +1580,7 @@ export default function App() {
             onOpenSavedSchemes={() => setIsSavedSchemesOpen(true)}
             savedSchemesCount={savedSchemes.length}
             authBannerMessage={authBannerMessage}
+            onNotify={showToast}
           />
         )}
       </main>
@@ -1246,15 +1620,65 @@ export default function App() {
         allSchemes={schemes}
         onRemoveScheme={schemeId => {
           if (activeCitizenFirebaseUser) {
-            removeSavedSchemeFromUserFirestore(activeCitizenFirebaseUser.uid, schemeId).catch(
-              err => console.error('Failed to remove saved scheme:', err)
-            );
+            removeSavedSchemeFromUserFirestore(activeCitizenFirebaseUser.uid, schemeId)
+              .then(() => {
+                showToast({
+                  type: 'info',
+                  title: 'Bookmark Removed',
+                  message: 'Removed scheme from your saved list.',
+                });
+              })
+              .catch(err => {
+                showToast({
+                  type: 'error',
+                  title: 'Remove Failed',
+                  message:
+                    err instanceof Error ? err.message : 'Failed to remove saved scheme.',
+                });
+              });
+          } else if (activeCitizenAccountUser && citizenAuthToken) {
+            fetch(`/api/citizen/saved-schemes/${encodeURIComponent(schemeId)}`, {
+              method: 'DELETE',
+              headers: { Authorization: `Bearer ${citizenAuthToken}` },
+            })
+              .then(res =>
+                parseApiResponse<{
+                  items?: Array<{ schemeId: string; schemeTitle: string; savedAt: string }>;
+                }>(res)
+              )
+              .then(parsed => {
+                if (!parsed.ok) {
+                  showToast({
+                    type: 'error',
+                    title: 'Remove Failed',
+                    message: parsed.errorInfo?.error || 'Failed to remove saved scheme.',
+                    details: parsed.errorInfo?.details,
+                  });
+                  return;
+                }
+                if (Array.isArray(parsed.data?.items)) {
+                  setSavedSchemes(parsed.data.items);
+                  showToast({
+                    type: 'info',
+                    title: 'Bookmark Removed',
+                    message: 'Removed scheme from your saved list.',
+                  });
+                }
+              })
+              .catch(err => {
+                showToast({
+                  type: 'error',
+                  title: 'Remove Failed',
+                  message:
+                    err instanceof Error ? err.message : 'Failed to remove saved scheme.',
+                });
+              });
           }
         }}
         onSelectScheme={scheme => {
           setIntakeScheme(scheme);
         }}
-        userEmail={activeCitizenFirebaseUser?.email}
+        userEmail={activeCitizenHeaderUser?.email}
       />
 
       {/* Official Civic Footer (No Admin Links) */}

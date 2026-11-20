@@ -16,11 +16,13 @@ import {
   signInAdminWithEmail,
   signInAdminWithGoogle,
 } from '../firebase';
+import { ToastItem } from './ToastContainer';
 
 interface AdminLoginPageProps {
   onAdminAuthenticated: (result: AdminAuthResult) => void;
   onReturnToCitizenPortal: () => void;
   redirectNotice?: string | null;
+  onNotify?: (toast: Omit<ToastItem, 'id'>) => void;
 }
 
 function formatAdminLoginError(err: unknown): string {
@@ -52,6 +54,7 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({
   onAdminAuthenticated,
   onReturnToCitizenPortal,
   redirectNotice,
+  onNotify,
 }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -60,13 +63,20 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const handleGoogleAdminSignIn = async () => {
+    if (isSubmitting) return;
     setErrorMsg(null);
     setIsSubmitting(true);
     try {
       const result = await signInAdminWithGoogle();
       onAdminAuthenticated(result);
     } catch (err) {
-      setErrorMsg(formatAdminLoginError(err));
+      const msg = formatAdminLoginError(err);
+      setErrorMsg(msg);
+      onNotify?.({
+        type: 'error',
+        title: 'Officer Authentication Failed',
+        message: msg,
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -74,6 +84,7 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({
 
   const handleEmailAdminSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     setErrorMsg(null);
 
     if (!email.trim() || !password) {
@@ -86,7 +97,13 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({
       const result = await signInAdminWithEmail(email, password);
       onAdminAuthenticated(result);
     } catch (err) {
-      setErrorMsg(formatAdminLoginError(err));
+      const msg = formatAdminLoginError(err);
+      setErrorMsg(msg);
+      onNotify?.({
+        type: 'error',
+        title: 'Admin Sign-In Failed',
+        message: msg,
+      });
     } finally {
       setIsSubmitting(false);
     }
