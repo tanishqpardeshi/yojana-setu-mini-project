@@ -202,6 +202,21 @@ function stripUndefined<T extends object>(obj: T): T {
   return clean;
 }
 
+export interface AdminSessionInfo {
+  authenticated: boolean;
+  uid: string;
+  email: string;
+  displayName: string;
+  role: 'admin';
+  adminSource?: string;
+}
+
+export interface AdminAuthResult {
+  user: User;
+  session: AdminSessionInfo;
+  idToken: string;
+}
+
 // Fetch user profile document from Firestore
 export async function fetchUserProfileFromFirestore(uid: string): Promise<UserProfileDoc | null> {
   const path = `users/${uid}`;
@@ -214,7 +229,99 @@ export async function fetchUserProfileFromFirestore(uid: string): Promise<UserPr
   }
 }
 
-// Sign in or register via Google Popup and sync profile in Firestore
+// Helper to get a fresh Firebase ID token Authorization header for authenticated API calls
+export async function getAuthBearerHeader(forceRefresh = false): Promise<Record<string, string>> {
+  const currentUser = auth.currentUser;
+  if (!currentUser) return {};
+  const token = await currentUser.getIdToken(forceRefresh);
+  return { Authorization: `Bearer ${token}` };
+}
+
+// Verify an authenticated user's Admin role claim with the Express server (/api/admin/session)
+export async function verifyAdminSessionWithServer(
+  user: User,
+  forceRefresh = true
+): Promise<{ session: AdminSessionInfo; idToken: string }> {
+  const idToken = await user.getIdToken(forceRefresh);
+  const res = await fetch('/api/admin/session', {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+    },
+  });
+
+  if (!res.ok) {
+    let errMessage = 'Access Denied: This account does not hold verified Administrator privileges.';
+    try {
+      const data = await res.json();
+      if (data?.error) errMessage = data.error;
+    } catch {
+      // ignore json error
+    }
+    const deniedErr = new Error(errMessage) as Error & { code?: string };
+    deniedErr.code = 'ADMIN_ACCESS_DENIED';
+    throw deniedErr;
+  }
+
+  const data = await res.json();
+  if (!data?.authenticated || data?.role !== 'admin') {
+    const deniedErr = new Error(
+      'Access Denied: Verified Administrator role claim is required.'
+    ) as Error & { code?: string };
+    deniedErr.code = 'ADMIN_ACCESS_DENIED';
+    throw deniedErr;
+  }
+
+  return {
+    session: {
+      authenticated: true,
+      uid: data.uid,
+      email: data.email,
+      displayName: data.displayName || user.displayName || data.email,
+      role: 'admin',
+      adminSource: data.adminSource,
+    },
+    idToken,
+  };
+}
+
+// Dedicated Admin-Only Sign-In via Google (NO public admin sign-up; strictly verifies server admin claim)
+export async function signInAdminWithGoogle(): Promise<AdminAuthResult> {
+  const result = await signInWithPopup(auth, googleProvider);
+  const user = result.user;
+  try {
+    const verified = await verifyAdminSessionWithServer(user, true);
+    return {
+      user,
+      session: verified.session,
+      idToken: verified.idToken,
+    };
+  } catch (err) {
+    // Isolate failed admin attempts by signing out immediately so no unverified session lingers
+    await signOut(auth).catch(() => {});
+    throw err;
+  }
+}
+
+// Dedicated Admin-Only Sign-In via Officer Email & Password (NO public admin sign-up)
+export async function signInAdminWithEmail(email: string, password: string): Promise<AdminAuthResult> {
+  const cleanEmail = email.trim();
+  const result = await signInWithEmailAndPassword(auth, cleanEmail, password);
+  const user = result.user;
+  try {
+    const verified = await verifyAdminSessionWithServer(user, true);
+    return {
+      user,
+      session: verified.session,
+      idToken: verified.idToken,
+    };
+  } catch (err) {
+    await signOut(auth).catch(() => {});
+    throw err;
+  }
+}
+
+// Citizen-Only Sign-In / Sign-Up via Google Popup (strictly assigns ONLY 'citizen' role)
 export async function signInWithGoogle(): Promise<AuthResult> {
   try {
     const result = await signInWithPopup(auth, googleProvider);
@@ -228,8 +335,6 @@ export async function signInWithGoogle(): Promise<AuthResult> {
 
     try {
       const existing = await getDoc(userRef);
-      const role: 'citizen' | 'admin' =
-        user.email === 'tanishqpardeshi9the12102@gmail.com' && user.emailVerified ? 'admin' : 'citizen';
 
       if (!existing.exists()) {
         isNewUser = true;
@@ -238,7 +343,7 @@ export async function signInWithGoogle(): Promise<AuthResult> {
           email: clampString(user.email, 160) || '',
           displayName: clampString(user.displayName, 120) || 'Citizen of Indore',
           photoURL: clampString(user.photoURL, 500),
-          role,
+          role: 'citizen',
           authMethod: 'google',
           isMpDomicile: true,
           isIndoreResident: true,
@@ -258,7 +363,7 @@ export async function signInWithGoogle(): Promise<AuthResult> {
           lastLoginAt: now,
         });
         await setDoc(userRef, updates, { merge: true });
-        profile = { ...prev, ...updates };
+        profile = { ...prev, ...updates, role: 'citizen' };
       }
     } catch (fsErr) {
       handleFirestoreError(fsErr, OperationType.WRITE, userPath);
@@ -266,12 +371,12 @@ export async function signInWithGoogle(): Promise<AuthResult> {
 
     return { user, profile, isNewUser };
   } catch (error) {
-    console.error('[Firebase Auth] Google Sign-In error:', error);
+    console.error('[Firebase Auth] Citizen Google Sign-In error:', error);
     throw error;
   }
 }
 
-// Register a new Citizen account via Email & Password + create Firestore UserProfile
+// Register a new Citizen account via Email & Password + create Firestore UserProfile (strictly 'citizen' role)
 export async function registerCitizenWithEmail(input: CitizenRegistrationInput): Promise<AuthResult> {
   const cleanEmail = input.email.trim();
   const credential = await createUserWithEmailAndPassword(auth, cleanEmail, input.password);
@@ -327,7 +432,7 @@ export async function registerCitizenWithEmail(input: CitizenRegistrationInput):
   return { user, profile, isNewUser: true };
 }
 
-// Login an existing Citizen via Email & Password + hydrate & update Firestore UserProfile
+// Login an existing Citizen via Email & Password + hydrate & update Firestore UserProfile (strictly 'citizen' scope)
 export async function loginCitizenWithEmail(email: string, password: string): Promise<AuthResult> {
   const cleanEmail = email.trim();
   const credential = await signInWithEmailAndPassword(auth, cleanEmail, password);
@@ -363,7 +468,7 @@ export async function loginCitizenWithEmail(email: string, password: string): Pr
         lastLoginAt: now,
       };
       await setDoc(userRef, updates, { merge: true });
-      profile = { ...prev, ...updates };
+      profile = { ...prev, ...updates, role: 'citizen' };
     }
 
     return { user, profile, isNewUser: false };

@@ -1,8 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Building2, ShieldCheck } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { Building2, ShieldCheck, ShieldAlert, LogOut, Loader2, Lock } from 'lucide-react';
 import {
   SupportedLanguage,
-  UserMode,
   CitizenProfile,
   Scheme,
   ApplicationRecord,
@@ -19,6 +18,18 @@ import {
 import { searchSchemes } from './utils/searchEngine';
 import { rankSchemesForCitizen } from './utils/rulesEngine';
 import { createEmptyCitizenProfile, evaluateSchemesRealtimeStatus } from './utils/liveDataEngine';
+import {
+  ADMIN_DASHBOARD_ROUTE,
+  ADMIN_LOGIN_ROUTE,
+  CITIZEN_DEFAULT_ROUTE,
+  evaluateRouteAccess,
+  isAdminLoginPath,
+  isAdminProtectedPath,
+  mapCitizenTabToPathname,
+  mapPathnameToCitizenTab,
+  normalizePathname,
+  PortalScope,
+} from './utils/rbacGuard';
 import { Header } from './components/Header';
 import { HeroSection } from './components/HeroSection';
 import { EligibilityCalculator } from './components/EligibilityCalculator';
@@ -27,15 +38,19 @@ import { SamagraFamilyView } from './components/SamagraFamilyView';
 import { DigiLockerTrackerView } from './components/DigiLockerTrackerView';
 import { ApplicationTrackerView } from './components/ApplicationTrackerView';
 import { AdminDashboard } from './components/AdminDashboard';
+import { AdminLoginPage } from './components/AdminLoginPage';
 import { ApplicationIntakeModal } from './components/ApplicationIntakeModal';
 import { CitizenEntitlementCardModal } from './components/CitizenEntitlementCardModal';
 import { SchemeComparisonModal } from './components/SchemeComparisonModal';
 import { SavedSchemesModal } from './components/SavedSchemesModal';
 import { AuthPage } from './components/AuthPage';
 import {
+  AdminAuthResult,
+  AdminSessionInfo,
   auth,
   AuthResult,
   fetchUserProfileFromFirestore,
+  getAuthBearerHeader,
   handleFirestoreError,
   logOutUser,
   mapUserProfileToCitizenProfile,
@@ -45,12 +60,59 @@ import {
   saveSchemeToUserFirestore,
   updateCitizenProfileInFirestore,
   UserProfileDoc,
+  verifyAdminSessionWithServer,
   db,
 } from './firebase';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { collection, onSnapshot } from 'firebase/firestore';
 
 const ACTIVE_SAMAGRA_STORAGE_KEY = 'yojanasetu_live_samagra_session';
+const PORTAL_SCOPE_STORAGE_KEY = 'yojanasetu_portal_scope';
+const MY_ARNS_STORAGE_KEY = 'yojanasetu_my_arns';
+
+function readPortalScope(): PortalScope | null {
+  try {
+    const val = sessionStorage.getItem(PORTAL_SCOPE_STORAGE_KEY);
+    return val === 'admin' || val === 'citizen' ? val : null;
+  } catch {
+    return null;
+  }
+}
+
+function writePortalScope(scope: PortalScope | null) {
+  try {
+    if (scope) {
+      sessionStorage.setItem(PORTAL_SCOPE_STORAGE_KEY, scope);
+    } else {
+      sessionStorage.removeItem(PORTAL_SCOPE_STORAGE_KEY);
+    }
+  } catch {
+    // ignore sessionStorage errors
+  }
+}
+
+function readMyArns(): string[] {
+  try {
+    const raw = localStorage.getItem(MY_ARNS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed)
+      ? parsed.filter((arn): arn is string => typeof arn === 'string' && arn.trim().length > 0)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberMyArn(arn: string) {
+  try {
+    const clean = arn.trim();
+    if (!clean) return;
+    const updated = Array.from(new Set([clean, ...readMyArns()])).slice(0, 25);
+    localStorage.setItem(MY_ARNS_STORAGE_KEY, JSON.stringify(updated));
+  } catch {
+    // ignore storage errors
+  }
+}
 
 function mapDigiLockerRecordsToProfileMap(
   docs: DigiLockerDocumentRecord[]
@@ -69,35 +131,119 @@ function mapDigiLockerRecordsToProfileMap(
 }
 
 export default function App() {
+  const [pathname, setPathname] = useState<string>(() => normalizePathname(window.location.pathname));
   const [currentLanguage, setCurrentLanguage] = useState<SupportedLanguage>('en');
-  const [userMode, setUserMode] = useState<UserMode>('citizen');
-  const [activeTab, setActiveTab] = useState<string>('schemes');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedLevel, setSelectedLevel] = useState<string>('all');
   const [isEntitlementCardOpen, setIsEntitlementCardOpen] = useState(false);
   const [isComparisonOpen, setIsComparisonOpen] = useState(false);
   const [comparisonInitialId, setComparisonInitialId] = useState<string | undefined>(undefined);
+
+  // Strict separated Citizen vs Admin auth state
+  const [authInitialized, setAuthInitialized] = useState(false);
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
+  const [portalScope, setPortalScope] = useState<PortalScope | null>(() => readPortalScope());
+  const [adminSession, setAdminSession] = useState<AdminSessionInfo | null>(null);
   const [userProfileDoc, setUserProfileDoc] = useState<UserProfileDoc | null>(null);
+
   const [authBannerMessage, setAuthBannerMessage] = useState<string | null>(null);
-  const [savedSchemes, setSavedSchemes] = useState<Array<{ schemeId: string; schemeTitle: string; savedAt: string }>>([]);
+  const [adminRedirectNotice, setAdminRedirectNotice] = useState<string | null>(null);
+  const [citizenSecurityBanner, setCitizenSecurityBanner] = useState<string | null>(null);
+
+  const [savedSchemes, setSavedSchemes] = useState<
+    Array<{ schemeId: string; schemeTitle: string; savedAt: string }>
+  >([]);
   const [isSavedSchemesOpen, setIsSavedSchemesOpen] = useState(false);
 
   // Clean unlinked initial citizen profile (zero demo defaults)
   const [citizenProfile, setCitizenProfile] = useState<CitizenProfile>(() => createEmptyCitizenProfile());
 
-  // 100% live backend-driven state
+  // Public schemes catalog
   const [schemes, setSchemes] = useState<Scheme[]>([]);
   const [schemesRealtimeReport, setSchemesRealtimeReport] = useState<SchemesRealtimeReport | null>(null);
   const [isCheckingRealtime, setIsCheckingRealtime] = useState(false);
-  const [applications, setApplications] = useState<ApplicationRecord[]>([]);
-  const [notifications, setNotifications] = useState<LiveNotification[]>([]);
-  const [samagraFamilies, setSamagraFamilies] = useState<SamagraFamily[]>([]);
+
+  // Citizen-scoped applications (only own Samagra ID / own ARNs)
+  const [citizenApplications, setCitizenApplications] = useState<ApplicationRecord[]>([]);
+
+  // Admin-only district datasets (loaded strictly with verified Admin Bearer token)
+  const [adminApplications, setAdminApplications] = useState<ApplicationRecord[]>([]);
+  const [adminNotifications, setAdminNotifications] = useState<LiveNotification[]>([]);
+  const [adminSamagraFamilies, setAdminSamagraFamilies] = useState<SamagraFamily[]>([]);
   const [districtStats, setDistrictStats] = useState<DistrictStats | null>(null);
+
   const [intakeScheme, setIntakeScheme] = useState<Scheme | null>(null);
 
-  const activeCitizenKey = citizenProfile.samagraMemberId || firebaseUser?.uid || null;
+  const navigateTo = useCallback((targetPath: string, replace = false) => {
+    const normalized = normalizePathname(targetPath);
+    if (normalizePathname(window.location.pathname) !== normalized) {
+      if (replace) {
+        window.history.replaceState({}, '', normalized);
+      } else {
+        window.history.pushState({}, '', normalized);
+      }
+    }
+    setPathname(normalized);
+  }, []);
 
+  useEffect(() => {
+    const onPopState = () => {
+      setPathname(normalizePathname(window.location.pathname));
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  const activeTab = useMemo(() => mapPathnameToCitizenTab(pathname), [pathname]);
+
+  const handleSelectCitizenTab = useCallback(
+    (tab: string) => {
+      setCitizenSecurityBanner(null);
+      navigateTo(mapCitizenTabToPathname(tab));
+    },
+    [navigateTo]
+  );
+
+  // Active Citizen Firebase session is strictly isolated from Admin sessions
+  const activeCitizenFirebaseUser = portalScope === 'admin' ? null : firebaseUser;
+  const activeCitizenKey =
+    citizenProfile.samagraMemberId || activeCitizenFirebaseUser?.uid || null;
+
+  const isVerifiedAdmin = Boolean(
+    firebaseUser && portalScope === 'admin' && adminSession?.authenticated && adminSession.role === 'admin'
+  );
+
+  // Evaluate pure RBAC route guard decision
+  const routeGuard = useMemo(
+    () =>
+      evaluateRouteAccess(pathname, {
+        authInitialized,
+        isAuthenticated: Boolean(firebaseUser),
+        portalScope,
+        verifiedAdminRole: Boolean(adminSession?.authenticated && adminSession.role === 'admin'),
+      }),
+    [pathname, authInitialized, firebaseUser, portalScope, adminSession]
+  );
+
+  // Enforce RBAC redirects immediately whenever guard blocks a route
+  useEffect(() => {
+    if (!routeGuard.allowed && routeGuard.redirectTo) {
+      if (routeGuard.reason === 'unauthenticated_admin') {
+        setAdminRedirectNotice(
+          routeGuard.bannerMessage ||
+            'Administrator authentication is required to access the District Admin Console.'
+        );
+      } else if (routeGuard.reason === 'citizen_forbidden_admin') {
+        setCitizenSecurityBanner(
+          routeGuard.bannerMessage ||
+            'Access Denied: Citizen sessions cannot access the District Admin Console.'
+        );
+      }
+      navigateTo(routeGuard.redirectTo, true);
+    }
+  }, [routeGuard, navigateTo]);
+
+  // Public schemes loader
   const fetchLiveSchemes = useCallback(async () => {
     try {
       const [schemesRes, statusRes] = await Promise.all([
@@ -124,17 +270,88 @@ export default function App() {
     }
   }, []);
 
-  const fetchLiveApplicationsAndStats = useCallback(async () => {
+  // Citizen-scoped applications loader (never hits unfiltered admin endpoints)
+  const fetchCitizenScopedApplications = useCallback(async () => {
     try {
-      const [appsRes, statsRes, famRes] = await Promise.all([
-        fetch('/api/applications'),
-        fetch('/api/stats'),
-        fetch('/api/samagra'),
+      const samagraLookupId = citizenProfile.samagraMemberId || citizenProfile.samagraFamilyId;
+      const myArns = readMyArns();
+      const collected = new Map<string, ApplicationRecord>();
+
+      if (samagraLookupId) {
+        const res = await fetch(
+          `/api/applications?samagraId=${encodeURIComponent(samagraLookupId)}`
+        );
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data?.records)) {
+            for (const rec of data.records as ApplicationRecord[]) {
+              collected.set(rec.arn, rec);
+            }
+          }
+        }
+      }
+
+      if (myArns.length > 0) {
+        const arnResults = await Promise.all(
+          myArns.slice(0, 15).map(async arn => {
+            try {
+              const res = await fetch(`/api/applications/${encodeURIComponent(arn)}`);
+              if (!res.ok) return null;
+              const data = await res.json();
+              return (data?.record as ApplicationRecord) || null;
+            } catch {
+              return null;
+            }
+          })
+        );
+        for (const rec of arnResults) {
+          if (rec) collected.set(rec.arn, rec);
+        }
+      }
+
+      const sorted = Array.from(collected.values()).sort((a, b) =>
+        (b.appliedDate || '').localeCompare(a.appliedDate || '')
+      );
+      setCitizenApplications(sorted);
+    } catch (err) {
+      console.warn('Could not load citizen applications:', err);
+    }
+  }, [citizenProfile.samagraFamilyId, citizenProfile.samagraMemberId]);
+
+  // Admin-only datasets loader (requires verified Admin Bearer token)
+  const fetchAdminDistrictData = useCallback(async () => {
+    if (!isVerifiedAdmin) return;
+    try {
+      const authHeaders = await getAuthBearerHeader(false);
+      if (!authHeaders.Authorization) return;
+
+      const [appsRes, statsRes, famRes, notifRes] = await Promise.all([
+        fetch('/api/admin/applications', { headers: authHeaders }),
+        fetch('/api/admin/stats', { headers: authHeaders }),
+        fetch('/api/admin/samagra', { headers: authHeaders }),
+        fetch('/api/admin/notifications?limit=50', { headers: authHeaders }),
       ]);
+
+      // If token lost admin authorization server-side, immediately invalidate admin session
+      if (
+        appsRes.status === 401 ||
+        appsRes.status === 403 ||
+        statsRes.status === 401 ||
+        statsRes.status === 403
+      ) {
+        setAdminSession(null);
+        writePortalScope(null);
+        setPortalScope(null);
+        await logOutUser().catch(() => {});
+        setAdminRedirectNotice('Administrator session expired or revoked. Please sign in again.');
+        navigateTo(ADMIN_LOGIN_ROUTE, true);
+        return;
+      }
+
       if (appsRes.ok) {
         const appsData = await appsRes.json();
         if (Array.isArray(appsData?.records)) {
-          setApplications(appsData.records);
+          setAdminApplications(appsData.records);
         }
       }
       if (statsRes.ok) {
@@ -146,27 +363,19 @@ export default function App() {
       if (famRes.ok) {
         const famData = await famRes.json();
         if (Array.isArray(famData?.families)) {
-          setSamagraFamilies(famData.families);
+          setAdminSamagraFamilies(famData.families);
+        }
+      }
+      if (notifRes.ok) {
+        const notifData = await notifRes.json();
+        if (Array.isArray(notifData?.notifications)) {
+          setAdminNotifications(notifData.notifications);
         }
       }
     } catch (err) {
-      console.warn('Could not load live district data:', err);
+      console.warn('Could not load protected admin datasets:', err);
     }
-  }, []);
-
-  const fetchLiveNotifications = useCallback(async () => {
-    try {
-      const res = await fetch('/api/notifications?limit=50');
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data?.notifications)) {
-          setNotifications(data.notifications);
-        }
-      }
-    } catch (err) {
-      console.warn('Could not load live notifications:', err);
-    }
-  }, []);
+  }, [isVerifiedAdmin, navigateTo]);
 
   const syncCitizenDigiLockerWallet = useCallback(async (citizenKey: string) => {
     try {
@@ -186,7 +395,6 @@ export default function App() {
     }
   }, []);
 
-  // Build CitizenProfile from a live Samagra Family member selection
   const buildProfileFromSamagraMember = useCallback(
     (member: FamilyMember, family: SamagraFamily): CitizenProfile => {
       const wardMatch = family.wardOrBlock?.match(/ward\s*(\d+)/i);
@@ -225,11 +433,9 @@ export default function App() {
     []
   );
 
-  // Initial live hydration from SQLite APIs + restore active Samagra session if present
+  // Initial public schemes load & Citizen Samagra session restore
   useEffect(() => {
     fetchLiveSchemes();
-    fetchLiveApplicationsAndStats();
-    fetchLiveNotifications();
 
     try {
       const savedRaw = localStorage.getItem(ACTIVE_SAMAGRA_STORAGE_KEY);
@@ -254,13 +460,21 @@ export default function App() {
     } catch {
       // ignore storage errors
     }
-  }, [
-    fetchLiveSchemes,
-    fetchLiveApplicationsAndStats,
-    fetchLiveNotifications,
-    buildProfileFromSamagraMember,
-    syncCitizenDigiLockerWallet,
-  ]);
+  }, [fetchLiveSchemes, buildProfileFromSamagraMember, syncCitizenDigiLockerWallet]);
+
+  // Hydrate Citizen-scoped applications whenever Citizen Samagra ID updates
+  useEffect(() => {
+    if (!isAdminProtectedPath(pathname) && !isAdminLoginPath(pathname)) {
+      fetchCitizenScopedApplications();
+    }
+  }, [pathname, fetchCitizenScopedApplications]);
+
+  // Hydrate Admin datasets strictly when verified Admin is active
+  useEffect(() => {
+    if (isVerifiedAdmin && isAdminProtectedPath(pathname)) {
+      fetchAdminDistrictData();
+    }
+  }, [isVerifiedAdmin, pathname, fetchAdminDistrictData]);
 
   // Sync DigiLocker whenever activeCitizenKey changes
   useEffect(() => {
@@ -269,7 +483,7 @@ export default function App() {
     }
   }, [activeCitizenKey, syncCitizenDigiLockerWallet]);
 
-  // Subscribe to genuine live SSE events from server
+  // Subscribe to non-PII live SSE signals from server
   useEffect(() => {
     let eventSource: EventSource | null = null;
     try {
@@ -279,19 +493,18 @@ export default function App() {
           const data = JSON.parse(event.data);
           if (!data || data.type === 'connected') return;
 
-          if (data.id && data.message) {
-            setNotifications(prev => {
-              if (prev.some(n => n.id === data.id)) return prev;
-              return [data, ...prev.slice(0, 49)];
-            });
-          }
-
-          if (data.eventType === 'application_updated' || data.eventType === 'samagra_updated') {
-            fetchLiveApplicationsAndStats();
-          } else if (data.eventType === 'digilocker_updated') {
-            fetchLiveApplicationsAndStats();
-          } else if (data.eventType === 'schemes_updated') {
+          if (data.eventType === 'schemes_updated') {
             fetchLiveSchemes();
+          } else if (
+            data.eventType === 'application_updated' ||
+            data.eventType === 'samagra_updated' ||
+            data.eventType === 'digilocker_updated'
+          ) {
+            if (isVerifiedAdmin) {
+              fetchAdminDistrictData();
+            } else {
+              fetchCitizenScopedApplications();
+            }
           }
         } catch {
           // ignore malformed event
@@ -304,47 +517,94 @@ export default function App() {
     return () => {
       if (eventSource) eventSource.close();
     };
-  }, [fetchLiveApplicationsAndStats, fetchLiveSchemes]);
+  }, [fetchLiveSchemes, fetchAdminDistrictData, fetchCitizenScopedApplications, isVerifiedAdmin]);
 
-  // Firebase Auth State Listener & Firestore UserProfile Hydration
+  // Firebase Auth State Listener with Strict Citizen vs Admin Session Isolation
   useEffect(() => {
+    let cancelled = false;
     const unsubscribeAuth = onAuthStateChanged(auth, async user => {
+      if (cancelled) return;
       setFirebaseUser(user);
-      if (user) {
-        setAuthBannerMessage(null);
+
+      if (!user) {
+        setUserProfileDoc(null);
+        setAdminSession(null);
+        setSavedSchemes([]);
+        setAdminApplications([]);
+        setAdminNotifications([]);
+        setAdminSamagraFamilies([]);
+        setDistrictStats(null);
+        writePortalScope(null);
+        setPortalScope(null);
+        setAuthInitialized(true);
+        return;
+      }
+
+      const storedScope = readPortalScope();
+      if (storedScope === 'admin') {
+        // Re-verify Admin claim cryptographically on the server before restoring Admin session
         try {
-          const docData = await fetchUserProfileFromFirestore(user.uid);
-          if (docData) {
-            setUserProfileDoc(docData);
-            setCitizenProfile(prev => mapUserProfileToCitizenProfile(docData, prev));
-          } else {
-            setCitizenProfile(prev => ({
-              ...prev,
-              fullName: user.displayName || prev.fullName,
-            }));
-          }
-        } catch (err) {
-          console.warn('Could not load Firestore user profile:', err);
+          const verified = await verifyAdminSessionWithServer(user, false);
+          if (cancelled) return;
+          setAdminSession(verified.session);
+          setPortalScope('admin');
+          setUserProfileDoc(null);
+        } catch {
+          if (cancelled) return;
+          setAdminSession(null);
+          writePortalScope('citizen');
+          setPortalScope('citizen');
+        } finally {
+          if (!cancelled) setAuthInitialized(true);
+        }
+        return;
+      }
+
+      // Default strictly to Citizen scope — never escalate Citizen sessions into Admin
+      setAdminSession(null);
+      writePortalScope('citizen');
+      setPortalScope('citizen');
+      setAuthBannerMessage(null);
+
+      try {
+        const docData = await fetchUserProfileFromFirestore(user.uid);
+        if (cancelled) return;
+        if (docData) {
+          const citizenScopedDoc: UserProfileDoc = { ...docData, role: 'citizen' };
+          setUserProfileDoc(citizenScopedDoc);
+          setCitizenProfile(prev => mapUserProfileToCitizenProfile(citizenScopedDoc, prev));
+        } else {
           setCitizenProfile(prev => ({
             ...prev,
             fullName: user.displayName || prev.fullName,
           }));
         }
-      } else {
-        setUserProfileDoc(null);
-        setSavedSchemes([]);
+      } catch (err) {
+        console.warn('Could not load Firestore citizen profile:', err);
+        setCitizenProfile(prev => ({
+          ...prev,
+          fullName: user.displayName || prev.fullName,
+        }));
+      } finally {
+        if (!cancelled) setAuthInitialized(true);
       }
     });
 
-    return () => unsubscribeAuth();
+    return () => {
+      cancelled = true;
+      unsubscribeAuth();
+    };
   }, []);
 
-  // Firestore Real-Time Saved Schemes Listener
+  // Firestore Real-Time Saved Schemes Listener (Citizen scope only)
   useEffect(() => {
-    if (!firebaseUser) return;
+    if (!activeCitizenFirebaseUser) {
+      setSavedSchemes([]);
+      return;
+    }
 
-    const savedPath = `users/${firebaseUser.uid}/savedSchemes`;
-    const savedSchemesCol = collection(db, 'users', firebaseUser.uid, 'savedSchemes');
+    const savedPath = `users/${activeCitizenFirebaseUser.uid}/savedSchemes`;
+    const savedSchemesCol = collection(db, 'users', activeCitizenFirebaseUser.uid, 'savedSchemes');
     const unsubscribeSaved = onSnapshot(
       savedSchemesCol,
       snapshot => {
@@ -361,45 +621,86 @@ export default function App() {
     );
 
     return () => unsubscribeSaved();
-  }, [firebaseUser]);
+  }, [activeCitizenFirebaseUser]);
 
-  const handleAuthSuccess = (result: AuthResult) => {
+  // Citizen Auth Success Handler (strictly Citizen role & Citizen Dashboard)
+  const handleCitizenAuthSuccess = (result: AuthResult) => {
+    writePortalScope('citizen');
+    setPortalScope('citizen');
+    setAdminSession(null);
     setFirebaseUser(result.user);
-    setUserProfileDoc(result.profile);
-    setCitizenProfile(prev => mapUserProfileToCitizenProfile(result.profile, prev));
+    const citizenDoc: UserProfileDoc = { ...result.profile, role: 'citizen' };
+    setUserProfileDoc(citizenDoc);
+    setCitizenProfile(prev => mapUserProfileToCitizenProfile(citizenDoc, prev));
     setAuthBannerMessage(null);
+    setCitizenSecurityBanner(null);
+  };
+
+  // Dedicated Admin Auth Success Handler (strictly verified Admin session -> /admin)
+  const handleAdminAuthenticated = (result: AdminAuthResult) => {
+    writePortalScope('admin');
+    setPortalScope('admin');
+    setFirebaseUser(result.user);
+    setAdminSession(result.session);
+    setUserProfileDoc(null);
+    setAdminRedirectNotice(null);
+    setCitizenSecurityBanner(null);
+    navigateTo(ADMIN_DASHBOARD_ROUTE, true);
   };
 
   const handleUpdateCitizenProfileInCloud = async (updates: Partial<UserProfileDoc>) => {
-    if (!firebaseUser) return;
-    const updatedDoc = await updateCitizenProfileInFirestore(firebaseUser.uid, updates);
-    setUserProfileDoc(updatedDoc);
-    setCitizenProfile(prev => mapUserProfileToCitizenProfile(updatedDoc, prev));
+    if (!activeCitizenFirebaseUser) return;
+    const updatedDoc = await updateCitizenProfileInFirestore(activeCitizenFirebaseUser.uid, updates);
+    const citizenDoc: UserProfileDoc = { ...updatedDoc, role: 'citizen' };
+    setUserProfileDoc(citizenDoc);
+    setCitizenProfile(prev => mapUserProfileToCitizenProfile(citizenDoc, prev));
   };
 
-  const handleSignOut = async () => {
+  const handleCitizenSignOut = async () => {
     try {
       await logOutUser();
+      writePortalScope(null);
+      setPortalScope(null);
       setUserProfileDoc(null);
+      setAdminSession(null);
       setAuthBannerMessage(null);
     } catch (err) {
-      console.error('Sign-Out failed:', err);
+      console.error('Citizen Sign-Out failed:', err);
+    }
+  };
+
+  const handleAdminSignOut = async () => {
+    try {
+      await logOutUser();
+      writePortalScope(null);
+      setPortalScope(null);
+      setAdminSession(null);
+      setAdminApplications([]);
+      setAdminNotifications([]);
+      setAdminSamagraFamilies([]);
+      setDistrictStats(null);
+      setAdminRedirectNotice('You have signed out of the District Admin Console.');
+      navigateTo(ADMIN_LOGIN_ROUTE, true);
+    } catch (err) {
+      console.error('Admin Sign-Out failed:', err);
     }
   };
 
   const handleToggleSaveScheme = async (scheme: Scheme) => {
-    if (!firebaseUser) {
-      setAuthBannerMessage(`Sign in or register as a citizen to bookmark "${scheme.title}" to your cloud profile.`);
-      setActiveTab('auth');
+    if (!activeCitizenFirebaseUser) {
+      setAuthBannerMessage(
+        `Sign in or register as a citizen to bookmark "${scheme.title}" to your cloud profile.`
+      );
+      handleSelectCitizenTab('auth');
       return;
     }
 
     try {
       const isAlreadySaved = savedSchemes.some(s => s.schemeId === scheme.id);
       if (isAlreadySaved) {
-        await removeSavedSchemeFromUserFirestore(firebaseUser.uid, scheme.id);
+        await removeSavedSchemeFromUserFirestore(activeCitizenFirebaseUser.uid, scheme.id);
       } else {
-        await saveSchemeToUserFirestore(firebaseUser.uid, scheme.id, scheme.title);
+        await saveSchemeToUserFirestore(activeCitizenFirebaseUser.uid, scheme.id, scheme.title);
       }
     } catch (err) {
       console.error('Failed to update saved scheme in Firestore:', err);
@@ -428,25 +729,31 @@ export default function App() {
     }
   };
 
-  // Live Admin Create Scheme
+  // Live Admin Create Scheme (strictly authenticated with Admin Bearer token)
   const handleCreateLiveScheme = async (
     schemePayload: Partial<Scheme> & { id: string; title: string }
   ): Promise<boolean> => {
+    if (!isVerifiedAdmin) return false;
     try {
+      const authHeaders = await getAuthBearerHeader(false);
       const res = await fetch('/api/schemes', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...authHeaders,
+        },
         body: JSON.stringify(schemePayload),
       });
       if (!res.ok) return false;
       await fetchLiveSchemes();
+      await fetchAdminDistrictData();
       return true;
     } catch {
       return false;
     }
   };
 
-  // Live DigiLocker Quick Verify (from Eligibility Calculator)
+  // Live DigiLocker Quick Verify (from Citizen Eligibility Calculator)
   const handleQuickVerifyDocument = async (docId: string, issuer: string): Promise<boolean> => {
     if (!activeCitizenKey) return false;
     try {
@@ -471,7 +778,6 @@ export default function App() {
           ...prev,
           verifiedDocuments: mapDigiLockerRecordsToProfileMap(data.documents),
         }));
-        fetchLiveApplicationsAndStats();
         return true;
       }
       return false;
@@ -485,7 +791,6 @@ export default function App() {
       ...prev,
       verifiedDocuments: mapDigiLockerRecordsToProfileMap(docs),
     }));
-    fetchLiveApplicationsAndStats();
   };
 
   // Handle member selection from live Samagra Family Portal
@@ -502,7 +807,7 @@ export default function App() {
     }
     syncCitizenDigiLockerWallet(member.memberId);
 
-    if (firebaseUser) {
+    if (activeCitizenFirebaseUser) {
       handleUpdateCitizenProfileInCloud({
         displayName: nextProfile.fullName,
         samagraFamilyId: family.familyId,
@@ -521,7 +826,7 @@ export default function App() {
         ekycVerified: member.ekycStatus,
       }).catch(err => console.warn('Firestore Samagra link sync warning:', err));
     }
-    setActiveTab('schemes');
+    handleSelectCitizenTab('schemes');
   };
 
   const handleSamagraSessionLogin = async (member: FamilyMember, family: SamagraFamily) => {
@@ -536,7 +841,7 @@ export default function App() {
       // ignore
     }
     await syncCitizenDigiLockerWallet(member.memberId);
-    if (firebaseUser) {
+    if (activeCitizenFirebaseUser) {
       await handleUpdateCitizenProfileInCloud({
         displayName: nextProfile.fullName,
         samagraFamilyId: family.familyId,
@@ -557,7 +862,7 @@ export default function App() {
     }
   };
 
-  // Submit live application to SQLite + Firestore
+  // Submit live application to SQLite + Firestore (Citizen action)
   const handleApplicationSubmit = async (appData: {
     schemeId: string;
     applicantName: string;
@@ -580,17 +885,20 @@ export default function App() {
 
       const data = await res.json();
       if (data.record) {
-        setApplications(prev => [data.record, ...prev.filter(a => a.arn !== data.record.arn)]);
-        fetchLiveApplicationsAndStats();
+        rememberMyArn(data.record.arn);
+        setCitizenApplications(prev => [
+          data.record,
+          ...prev.filter(a => a.arn !== data.record.arn),
+        ]);
 
-        if (firebaseUser) {
+        if (activeCitizenFirebaseUser) {
           const targetScheme = schemes.find(s => s.id === appData.schemeId);
           saveApplicationToFirestore({
             arn: data.record.arn,
             schemeId: appData.schemeId,
             schemeName: targetScheme ? targetScheme.title : data.record.schemeTitle,
             applicantName: appData.applicantName,
-            applicantUid: firebaseUser.uid,
+            applicantUid: activeCitizenFirebaseUser.uid,
             samagraId: appData.samagraMemberId,
             wardNumber: appData.areaType === 'urban' ? citizenProfile.wardNumber : undefined,
             status: 'Submitted',
@@ -604,26 +912,33 @@ export default function App() {
     }
 
     setIntakeScheme(null);
-    setActiveTab('tracker');
+    handleSelectCitizenTab('tracker');
   };
 
-  // Live Admin update application status
+  // Live Admin update application status (strictly authenticated with Admin Bearer token)
   const handleAdminUpdateApplicationStatus = async (
     arn: string,
     status: ApplicationRecord['currentStatus'],
     remarks?: string
   ) => {
+    if (!isVerifiedAdmin) return;
     try {
+      const authHeaders = await getAuthBearerHeader(false);
       const res = await fetch(`/api/applications/${encodeURIComponent(arn)}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...authHeaders,
+        },
         body: JSON.stringify({ status, remarks }),
       });
       if (res.ok) {
         const data = await res.json();
         if (data?.record) {
-          setApplications(prev => prev.map(a => (a.arn === data.record.arn ? data.record : a)));
-          fetchLiveApplicationsAndStats();
+          setAdminApplications(prev =>
+            prev.map(a => (a.arn === data.record.arn ? data.record : a))
+          );
+          fetchAdminDistrictData();
         }
       }
     } catch (err) {
@@ -631,19 +946,27 @@ export default function App() {
     }
   };
 
-  // Broadcast notification from admin
+  // Broadcast notification from admin (strictly authenticated with Admin Bearer token)
   const handleBroadcastNotification = async (notifData: {
     type: LiveNotification['type'];
     message: string;
     wardOrBlock: string;
     amount?: number;
   }) => {
+    if (!isVerifiedAdmin) return;
     try {
-      await fetch('/api/notifications', {
+      const authHeaders = await getAuthBearerHeader(false);
+      const res = await fetch('/api/notifications', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...authHeaders,
+        },
         body: JSON.stringify(notifData),
       });
+      if (res.ok) {
+        fetchAdminDistrictData();
+      }
     } catch (e) {
       console.warn('Broadcast API call failed:', e);
     }
@@ -657,24 +980,137 @@ export default function App() {
   // Compute eligibility results for active citizen profile
   const eligibilityResults = rankSchemesForCitizen(citizenProfile, schemes);
 
+  // ================= DEDICATED ADMIN LOGIN ROUTE (/admin/login) =================
+  if (isAdminLoginPath(pathname)) {
+    return (
+      <AdminLoginPage
+        onAdminAuthenticated={handleAdminAuthenticated}
+        onReturnToCitizenPortal={() => {
+          setAdminRedirectNotice(null);
+          navigateTo(CITIZEN_DEFAULT_ROUTE);
+        }}
+        redirectNotice={adminRedirectNotice}
+      />
+    );
+  }
+
+  // ================= STRICTLY GUARDED ADMIN CONSOLE ROUTE (/admin*) =================
+  if (isAdminProtectedPath(pathname)) {
+    if (!authInitialized || !routeGuard.allowed || !isVerifiedAdmin) {
+      return (
+        <div className="min-h-screen bg-slate-950 text-slate-200 flex flex-col items-center justify-center p-6 space-y-3">
+          <Loader2 className="w-7 h-7 text-purple-400 animate-spin" />
+          <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+            Verifying Administrator Role &amp; Session...
+          </p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-heading">
+        {/* Dedicated Isolated Admin Top Bar (No Citizen Navigation) */}
+        <header className="sticky top-0 z-40 bg-slate-950 text-white border-b border-slate-800 shadow-sm">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center space-x-3">
+              <div className="w-9 h-9 rounded-xl bg-purple-600/20 border border-purple-400/40 flex items-center justify-center text-purple-300">
+                <Lock className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-base font-black tracking-tight text-white">
+                    YojanaSetu <span className="text-purple-400">Admin Console</span>
+                  </span>
+                  <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold uppercase px-2 py-0.5 rounded-full">
+                    RBAC Verified
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  District Collectorate &amp; Indore Municipal Corporation • Isolated Administrative Session
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="text-right hidden sm:block">
+                <p className="text-xs font-bold text-white leading-tight">
+                  {adminSession?.displayName || 'District Administrator'}
+                </p>
+                <p className="text-[11px] text-slate-400 font-mono">
+                  {adminSession?.email}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleAdminSignOut}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-600/15 hover:bg-rose-600/25 text-rose-200 border border-rose-500/30 text-xs font-bold transition cursor-pointer"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>Admin Sign Out</span>
+              </button>
+            </div>
+          </div>
+        </header>
+
+        <main className="flex-1">
+          <AdminDashboard
+            currentLanguage={currentLanguage}
+            notifications={adminNotifications}
+            applications={adminApplications}
+            schemes={schemes}
+            samagraFamilies={adminSamagraFamilies}
+            stats={districtStats}
+            schemesRealtimeReport={schemesRealtimeReport}
+            isCheckingRealtime={isCheckingRealtime}
+            onRunSchemesRealtimeCheck={handleRunSchemesRealtimeCheck}
+            onUpdateApplicationStatus={handleAdminUpdateApplicationStatus}
+            onCreateLiveScheme={handleCreateLiveScheme}
+            onBroadcastNotification={handleBroadcastNotification}
+          />
+        </main>
+      </div>
+    );
+  }
+
+  // ================= PUBLIC / CITIZEN PORTAL =================
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-heading">
-      {/* Global Header */}
+      {/* Citizen-Only Header (Zero Admin Mode Switcher or Admin Links) */}
       <Header
         currentLanguage={currentLanguage}
         setLanguage={setCurrentLanguage}
-        userMode={userMode}
-        setUserMode={setUserMode}
-        onOpenSamagraModal={() => setActiveTab('samagra')}
+        onOpenSamagraModal={() => handleSelectCitizenTab('samagra')}
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        firebaseUser={firebaseUser}
-        onSignOut={handleSignOut}
+        setActiveTab={handleSelectCitizenTab}
+        firebaseUser={activeCitizenFirebaseUser}
+        onSignOut={handleCitizenSignOut}
         savedSchemesCount={savedSchemes.length}
         onOpenSavedSchemes={() => setIsSavedSchemesOpen(true)}
       />
 
-      {/* Main Tab Content */}
+      {/* Security / RBAC Block Banner when a Citizen tries to open /admin */}
+      {citizenSecurityBanner && (
+        <div className="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-4">
+          <div
+            role="alert"
+            className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-900 text-xs font-semibold flex items-center justify-between gap-3"
+          >
+            <div className="flex items-center gap-2">
+              <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0" />
+              <span>{citizenSecurityBanner}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setCitizenSecurityBanner(null)}
+              className="text-rose-700 hover:text-rose-950 font-bold cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Main Citizen Content */}
       <main className="flex-1">
         {activeTab === 'schemes' && (
           <div>
@@ -705,8 +1141,8 @@ export default function App() {
                 citizenKey={activeCitizenKey}
                 onQuickVerifyDocument={handleQuickVerifyDocument}
                 onApplyScheme={scheme => setIntakeScheme(scheme)}
-                onNavigateToDigilocker={() => setActiveTab('digilocker')}
-                onNavigateToSamagra={() => setActiveTab('samagra')}
+                onNavigateToDigilocker={() => handleSelectCitizenTab('digilocker')}
+                onNavigateToSamagra={() => handleSelectCitizenTab('samagra')}
                 schemesRealtimeReport={schemesRealtimeReport}
                 isCheckingRealtime={isCheckingRealtime}
                 onRunSchemesRealtimeCheck={handleRunSchemesRealtimeCheck}
@@ -723,7 +1159,7 @@ export default function App() {
             schemes={schemes}
             onSelectLevel={(lvl: GovernanceLevel) => {
               setSelectedLevel(lvl);
-              setActiveTab('schemes');
+              handleSelectCitizenTab('schemes');
             }}
           />
         )}
@@ -735,7 +1171,7 @@ export default function App() {
             activeFamilyId={citizenProfile.samagraFamilyId}
             activeMemberId={citizenProfile.samagraMemberId}
             onSelectMemberForProfile={handleSelectMemberForProfile}
-            onFamiliesChanged={fetchLiveApplicationsAndStats}
+            onFamiliesChanged={fetchCitizenScopedApplications}
           />
         )}
 
@@ -745,51 +1181,29 @@ export default function App() {
             profile={citizenProfile}
             citizenKey={activeCitizenKey}
             onSyncDocumentsFromServer={handleSyncDocumentsFromServer}
-            onNavigateToSamagra={() => setActiveTab('samagra')}
+            onNavigateToSamagra={() => handleSelectCitizenTab('samagra')}
           />
         )}
 
         {activeTab === 'tracker' && (
           <ApplicationTrackerView
             currentLanguage={currentLanguage}
-            applications={applications}
-            onNavigateToSchemes={() => setActiveTab('schemes')}
-          />
-        )}
-
-        {activeTab === 'admin' && (
-          <AdminDashboard
-            currentLanguage={currentLanguage}
-            notifications={notifications}
-            applications={applications}
-            schemes={schemes}
-            samagraFamilies={samagraFamilies}
-            stats={districtStats}
-            schemesRealtimeReport={schemesRealtimeReport}
-            isCheckingRealtime={isCheckingRealtime}
-            onRunSchemesRealtimeCheck={handleRunSchemesRealtimeCheck}
-            onUpdateApplicationStatus={handleAdminUpdateApplicationStatus}
-            onCreateLiveScheme={handleCreateLiveScheme}
-            onBroadcastNotification={handleBroadcastNotification}
-            onFilterWardSchemes={(wardNum: number) => {
-              setSearchQuery(`Ward ${wardNum}`);
-              setUserMode('citizen');
-              setActiveTab('schemes');
-            }}
+            applications={citizenApplications}
+            onNavigateToSchemes={() => handleSelectCitizenTab('schemes')}
           />
         )}
 
         {activeTab === 'auth' && (
           <AuthPage
             currentLanguage={currentLanguage}
-            firebaseUser={firebaseUser}
+            firebaseUser={activeCitizenFirebaseUser}
             userProfileDoc={userProfileDoc}
             citizenProfile={citizenProfile}
-            onAuthSuccess={handleAuthSuccess}
+            onAuthSuccess={handleCitizenAuthSuccess}
             onSamagraSessionLogin={handleSamagraSessionLogin}
             onUpdateCitizenProfile={handleUpdateCitizenProfileInCloud}
-            onSignOut={handleSignOut}
-            onNavigateTab={setActiveTab}
+            onSignOut={handleCitizenSignOut}
+            onNavigateTab={handleSelectCitizenTab}
             onOpenSavedSchemes={() => setIsSavedSchemesOpen(true)}
             savedSchemesCount={savedSchemes.length}
             authBannerMessage={authBannerMessage}
@@ -831,19 +1245,19 @@ export default function App() {
         savedSchemes={savedSchemes}
         allSchemes={schemes}
         onRemoveScheme={schemeId => {
-          if (firebaseUser) {
-            removeSavedSchemeFromUserFirestore(firebaseUser.uid, schemeId).catch(err =>
-              console.error('Failed to remove saved scheme:', err)
+          if (activeCitizenFirebaseUser) {
+            removeSavedSchemeFromUserFirestore(activeCitizenFirebaseUser.uid, schemeId).catch(
+              err => console.error('Failed to remove saved scheme:', err)
             );
           }
         }}
         onSelectScheme={scheme => {
           setIntakeScheme(scheme);
         }}
-        userEmail={firebaseUser?.email}
+        userEmail={activeCitizenFirebaseUser?.email}
       />
 
-      {/* Official Civic Footer */}
+      {/* Official Civic Footer (No Admin Links) */}
       <footer className="bg-slate-900 text-slate-300 py-10 border-t border-slate-800 no-print">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid grid-cols-1 md:grid-cols-4 gap-8 text-xs">
           <div className="space-y-3">
@@ -852,7 +1266,7 @@ export default function App() {
               <span>YojanaSetu Indore</span>
             </div>
             <p className="text-slate-400 leading-relaxed">
-              Real-time, centralized government scheme discovery & citizen entitlement platform for the citizens of Indore District and Madhya Pradesh.
+              Real-time, centralized government scheme discovery &amp; citizen entitlement platform for the citizens of Indore District and Madhya Pradesh.
             </p>
             <div className="text-[11px] text-amber-400 font-mono">
               IMC Wards 1-85 • Janpads: Indore, Mhow, Sanwer, Depalpur
@@ -862,7 +1276,7 @@ export default function App() {
           <div>
             <h5 className="font-bold text-white text-xs uppercase tracking-wider mb-3">Governance Tiers</h5>
             <ul className="space-y-1.5 text-slate-400">
-              <li>Level 1: International & ADB Infra</li>
+              <li>Level 1: International &amp; ADB Infra</li>
               <li>Level 2: National / Central Sector</li>
               <li>Level 3: Madhya Pradesh State</li>
               <li>Level 4: Indore Collectorate</li>
@@ -890,13 +1304,13 @@ export default function App() {
             </p>
             <div className="mt-3 flex items-center space-x-1 text-emerald-400 font-semibold">
               <ShieldCheck className="w-3.5 h-3.5" />
-              <span>Powered by NIC & MP State IT Policy</span>
+              <span>Powered by NIC &amp; MP State IT Policy</span>
             </div>
           </div>
         </div>
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 pt-6 border-t border-slate-800 text-center text-[11px] text-slate-500">
-          © 2026 YojanaSetu • District Administration Indore & Indore Municipal Corporation.
+          © 2026 YojanaSetu • District Administration Indore &amp; Indore Municipal Corporation.
         </div>
       </footer>
     </div>

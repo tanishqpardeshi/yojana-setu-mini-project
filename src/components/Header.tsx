@@ -1,20 +1,17 @@
 import React from 'react';
-import { 
-  Building2, 
-  User, 
-  LayoutDashboard, 
-  PhoneCall, 
+import {
+  Building2,
+  User,
+  PhoneCall,
   Languages,
   Bookmark,
-  LogOut
+  LogOut,
 } from 'lucide-react';
-import { SupportedLanguage, UserMode } from '../types';
+import { SupportedLanguage } from '../types';
 
 interface HeaderProps {
   currentLanguage: SupportedLanguage;
   setLanguage: (lang: SupportedLanguage) => void;
-  userMode: UserMode;
-  setUserMode: (mode: UserMode) => void;
   onOpenSamagraModal: () => void;
   activeTab: string;
   setActiveTab: (tab: string) => void;
@@ -32,9 +29,6 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   currentLanguage,
   setLanguage,
-  userMode,
-  setUserMode,
-  onOpenSamagraModal,
   activeTab,
   setActiveTab,
   firebaseUser,
@@ -43,9 +37,6 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenSavedSchemes,
 }) => {
   const selectCitizenTab = (tab: string) => {
-    if (userMode !== 'citizen') {
-      setUserMode('citizen');
-    }
     setActiveTab(tab);
   };
   return (
@@ -255,42 +246,6 @@ export const Header: React.FC<HeaderProps> = ({
               <span className="sm:hidden">Login</span>
             </button>
           )}
-
-          {/* User Mode Switcher (Citizen & Admin) */}
-          <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200">
-            <button
-              onClick={() => {
-                setUserMode('citizen');
-                if (activeTab === 'admin') {
-                  setActiveTab('schemes');
-                }
-              }}
-              className={`inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition ${
-                userMode === 'citizen'
-                  ? 'bg-emerald-600 text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-              title="Citizen Mode"
-            >
-              <User className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Citizen</span>
-            </button>
-            <button
-              onClick={() => {
-                setUserMode('admin');
-                setActiveTab('admin');
-              }}
-              className={`inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition ${
-                userMode === 'admin'
-                  ? 'bg-purple-600 text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-              title="District Collectorate & IMC Admin Control"
-            >
-              <LayoutDashboard className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Admin</span>
-            </button>
-          </div>
         </div>
       </div>
 

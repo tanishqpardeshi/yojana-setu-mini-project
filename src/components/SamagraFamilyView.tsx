@@ -56,6 +56,30 @@ const OCCUPATIONS: OccupationType[] = [
 const CATEGORIES: Category[] = ['GEN', 'OBC', 'SC', 'ST', 'EWS'];
 const MARITAL_STATUSES: MaritalStatus[] = ['Married', 'Unmarried', 'Widow', 'Divorced'];
 
+const MY_SAMAGRA_IDS_KEY = 'yojanasetu_my_samagra_ids';
+
+function readStoredSamagraIds(): string[] {
+  try {
+    const raw = localStorage.getItem(MY_SAMAGRA_IDS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string' && id.trim().length > 0) : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberSamagraFamilyId(familyId: string) {
+  try {
+    const clean = familyId.trim();
+    if (!clean) return;
+    const existing = readStoredSamagraIds();
+    const updated = Array.from(new Set([clean, ...existing])).slice(0, 12);
+    localStorage.setItem(MY_SAMAGRA_IDS_KEY, JSON.stringify(updated));
+  } catch {
+    // ignore storage errors
+  }
+}
+
 function generateSamagraFamilyId(): string {
   return String(Math.floor(40000000 + Math.random() * 59999999));
 }
@@ -129,25 +153,53 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
   const loadRegisteredFamilies = async (preserveSelectedId?: string) => {
     setLoadingList(true);
     try {
-      const res = await fetch('/api/samagra');
-      if (res.ok) {
-        const data = await res.json();
-        const list: SamagraFamily[] = Array.isArray(data?.families) ? data.families : [];
-        setRegisteredFamilies(list);
-        const targetId = preserveSelectedId || activeFamilyId;
-        if (targetId) {
-          const match = list.find(
-            f => f.familyId === targetId || f.members.some(m => m.memberId === targetId)
-          );
-          if (match) {
-            setSelectedFamily(match);
+      const candidateIds = Array.from(
+        new Set(
+          [preserveSelectedId, activeFamilyId, ...readStoredSamagraIds()].filter(
+            (id): id is string => Boolean(id && id.trim())
+          )
+        )
+      );
+
+      if (candidateIds.length === 0) {
+        setRegisteredFamilies([]);
+        setLoadingList(false);
+        return;
+      }
+
+      const fetched = await Promise.all(
+        candidateIds.map(async id => {
+          try {
+            const res = await fetch(`/api/samagra/${encodeURIComponent(id)}`);
+            if (!res.ok) return null;
+            const data = await res.json();
+            return (data?.family as SamagraFamily) || null;
+          } catch {
+            return null;
           }
-        } else if (list.length > 0 && !selectedFamily) {
-          setSelectedFamily(list[0]);
+        })
+      );
+
+      const dedupedMap = new Map<string, SamagraFamily>();
+      for (const fam of fetched) {
+        if (fam) dedupedMap.set(fam.familyId, fam);
+      }
+      const list = Array.from(dedupedMap.values());
+      setRegisteredFamilies(list);
+
+      const targetId = preserveSelectedId || activeFamilyId;
+      if (targetId) {
+        const match = list.find(
+          f => f.familyId === targetId || f.members.some(m => m.memberId === targetId)
+        );
+        if (match) {
+          setSelectedFamily(match);
         }
+      } else if (list.length > 0 && !selectedFamily) {
+        setSelectedFamily(list[0]);
       }
     } catch (err) {
-      console.warn('Could not load live Samagra registry:', err);
+      console.warn('Could not load linked Samagra households:', err);
     } finally {
       setLoadingList(false);
     }
@@ -174,9 +226,12 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
       if (res.ok) {
         const data = await res.json();
         if (data?.family) {
-          setSelectedFamily(data.family);
+          const fam = data.family as SamagraFamily;
+          rememberSamagraFamilyId(fam.familyId);
+          setSelectedFamily(fam);
+          setRegisteredFamilies(prev => [fam, ...prev.filter(f => f.familyId !== fam.familyId)]);
           setShowRegisterForm(false);
-          setStatusBanner(`Fetched live Samagra record for Family ID ${data.family.familyId} from SQLite.`);
+          setStatusBanner(`Fetched live Samagra record for Family ID ${fam.familyId}.`);
           return;
         }
       }
@@ -269,6 +324,7 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
         return;
       }
 
+      rememberSamagraFamilyId(data.family.familyId);
       setSelectedFamily(data.family);
       setSearchId(data.family.familyId);
       setShowRegisterForm(false);
@@ -468,15 +524,15 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
           </button>
         </form>
 
-        {/* Live Registered Households Directory Strip */}
+        {/* Session-Linked Samagra Households Strip */}
         <div className="pt-3 border-t border-slate-100">
           <div className="flex items-center justify-between flex-wrap gap-2 text-xs">
             <span className="text-slate-600 font-semibold">
-              Live Registered Households in Database ({registeredFamilies.length}):
+              Your Linked Samagra Households ({registeredFamilies.length}):
             </span>
             {registeredFamilies.length === 0 && !loadingList && (
               <span className="text-amber-700 font-medium">
-                No households registered yet — click "Register New Samagra Family" to begin live simulation.
+                Enter your 8-digit Samagra Family ID above or click "Register New Samagra Family".
               </span>
             )}
           </div>

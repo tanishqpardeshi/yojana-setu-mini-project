@@ -445,7 +445,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <Clock className="w-8 h-8 text-slate-400 mx-auto" />
                 <h4 className="text-sm font-bold text-slate-800">No Live Applications in Queue</h4>
                 <p className="text-xs text-slate-500 max-w-md mx-auto">
-                  Switch to Citizen mode, register/link a Samagra ID, verify DigiLocker docs, and submit any scheme application to watch it arrive here in real time.
+                  When citizens register a Samagra ID, verify DigiLocker docs, and submit scheme applications on the Citizen Portal, their applications arrive here in real time.
                 </p>
               </div>
             ) : (

@@ -168,15 +168,33 @@ export const AuthPage: React.FC<AuthPageProps> = ({
   const [samagraError, setSamagraError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch('/api/samagra')
-      .then(r => (r.ok ? r.json() : null))
-      .then(data => {
-        if (Array.isArray(data?.families)) {
-          setLiveSamagraList(data.families);
-        }
-      })
-      .catch(() => {});
-  }, []);
+    try {
+      const raw = localStorage.getItem('yojanasetu_my_samagra_ids');
+      const ids: string[] = raw ? JSON.parse(raw) : [];
+      const candidateIds = Array.from(
+        new Set(
+          [citizenProfile.samagraFamilyId, ...(Array.isArray(ids) ? ids : [])].filter(
+            (id): id is string => typeof id === 'string' && id.trim().length > 0
+          )
+        )
+      ).slice(0, 5);
+
+      if (candidateIds.length === 0) return;
+
+      Promise.all(
+        candidateIds.map(id =>
+          fetch(`/api/samagra/${encodeURIComponent(id)}`)
+            .then(r => (r.ok ? r.json() : null))
+            .then(d => (d?.family as SamagraFamily) || null)
+            .catch(() => null)
+        )
+      ).then(results => {
+        setLiveSamagraList(results.filter((f): f is SamagraFamily => f !== null));
+      });
+    } catch {
+      // ignore storage errors
+    }
+  }, [citizenProfile.samagraFamilyId]);
 
   // Operational state
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -329,7 +347,16 @@ export const AuthPage: React.FC<AuthPageProps> = ({
               ],
             }),
           });
-          if (!samRes.ok) {
+          if (samRes.ok) {
+            try {
+              const prevRaw = localStorage.getItem('yojanasetu_my_samagra_ids');
+              const prevIds = prevRaw ? JSON.parse(prevRaw) : [];
+              const nextIds = Array.from(new Set([cleanFamilyId, ...(Array.isArray(prevIds) ? prevIds : [])])).slice(0, 12);
+              localStorage.setItem('yojanasetu_my_samagra_ids', JSON.stringify(nextIds));
+            } catch {
+              // ignore storage errors
+            }
+          } else {
             console.warn('SQLite Samagra sync returned status:', samRes.status);
           }
         } catch (samErr) {
@@ -545,10 +572,8 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                   </span>
                 </div>
                 <div>
-                  <span className="text-slate-500 block">Role</span>
-                  <span className="font-semibold text-slate-900 capitalize">
-                    {userProfileDoc?.role || 'citizen'}
-                  </span>
+                  <span className="text-slate-500 block">Account Role</span>
+                  <span className="font-semibold text-emerald-700">Citizen</span>
                 </div>
               </div>
 
@@ -1107,7 +1132,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                     <div className="flex flex-wrap items-center gap-2 text-xs">
                       {liveSamagraList.length > 0 ? (
                         <>
-                          <span className="text-slate-500">Live Registered Households:</span>
+                          <span className="text-slate-500">Your Linked Households:</span>
                           {liveSamagraList.slice(0, 5).map(fam => (
                             <button
                               key={fam.familyId}
@@ -1124,7 +1149,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                         </>
                       ) : (
                         <div className="w-full flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
-                          <span className="text-slate-600">No Samagra household registered yet in the live database.</span>
+                          <span className="text-slate-600">Enter your 8-digit Samagra Family ID or register a new household.</span>
                           <button
                             type="button"
                             onClick={() => onNavigateTab('samagra')}

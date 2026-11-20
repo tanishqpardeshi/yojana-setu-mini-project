@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { dbService } from './server/db.js';
+import { requireAdmin } from './server/authMiddleware.js';
 import {
   ApplicationRecord,
   DigiLockerDocumentRecord,
@@ -52,9 +53,11 @@ function pushSsePayload(payload: Record<string, unknown>) {
 
 function broadcastNotification(notification: LiveNotification, eventType?: string) {
   dbService.insertNotification(notification);
+  // Push non-PII live refresh signal over public SSE so no citizen PII leaks across sessions
   pushSsePayload({
-    ...notification,
     eventType: eventType || 'notification',
+    type: notification.type,
+    timestamp: notification.timestamp,
   });
 }
 
@@ -139,8 +142,85 @@ app.get('/api/stream/events', (req: Request, res: Response) => {
   });
 });
 
-// District Macro Stats (100% real SQLite data)
-app.get('/api/stats', (_req: Request, res: Response) => {
+// ================= ADMIN RBAC SESSION & PROTECTED ENDPOINTS =================
+
+// Verify authenticated Administrator session & role claim
+app.get('/api/admin/session', requireAdmin, (req: Request, res: Response) => {
+  const principal = req.authPrincipal!;
+  res.json({
+    authenticated: true,
+    role: 'admin',
+    uid: principal.uid,
+    email: principal.email,
+    displayName: principal.displayName,
+    adminSource: principal.adminSource,
+  });
+});
+
+// Admin-only full Applications listing
+app.get('/api/admin/applications', requireAdmin, (req: Request, res: Response) => {
+  try {
+    const { arn, samagraId, status } = req.query;
+    const records = dbService.getApplications({
+      arn: arn ? String(arn) : undefined,
+      samagraId: samagraId ? String(samagraId) : undefined,
+      status: status ? String(status) : undefined,
+    });
+    res.json({ records, count: records.length });
+  } catch (err) {
+    console.error('[API GET /api/admin/applications] Error:', err);
+    res.status(500).json({ error: 'Failed to load district applications' });
+  }
+});
+
+// Admin-only full Samagra households listing
+app.get('/api/admin/samagra', requireAdmin, (_req: Request, res: Response) => {
+  try {
+    const families = dbService.getAllSamagraFamilies();
+    res.json({ families, count: families.length });
+  } catch (err) {
+    console.error('[API GET /api/admin/samagra] Error:', err);
+    res.status(500).json({ error: 'Failed to list Samagra households' });
+  }
+});
+
+// Admin-only District Macro Stats
+app.get('/api/admin/stats', requireAdmin, (_req: Request, res: Response) => {
+  try {
+    const stats = dbService.getDistrictStats();
+    res.json({ stats });
+  } catch (err) {
+    console.error('[API /api/admin/stats] Error:', err);
+    res.status(500).json({ error: 'Failed to load district statistics' });
+  }
+});
+
+// Admin-only Ward & Janpad Live Stats
+app.get('/api/admin/stats/wards', requireAdmin, (_req: Request, res: Response) => {
+  try {
+    const live = dbService.getWardAndBlockLiveStats();
+    res.json(live);
+  } catch (err) {
+    console.error('[API /api/admin/stats/wards] Error:', err);
+    res.status(500).json({ error: 'Failed to load live ward metrics' });
+  }
+});
+
+// Admin-only Full Administrative Activity Stream
+app.get('/api/admin/notifications', requireAdmin, (req: Request, res: Response) => {
+  try {
+    const parsedLimit = req.query.limit ? Number(req.query.limit) : 50;
+    const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? Math.min(200, Math.floor(parsedLimit)) : 50;
+    const notifications = dbService.getNotifications(limit);
+    res.json({ notifications });
+  } catch (err) {
+    console.error('[API /api/admin/notifications] Error:', err);
+    res.status(500).json({ error: 'Failed to load administrative notifications' });
+  }
+});
+
+// District Macro Stats (Admin-protected)
+app.get('/api/stats', requireAdmin, (_req: Request, res: Response) => {
   try {
     const stats = dbService.getDistrictStats();
     res.json({ stats });
@@ -150,8 +230,8 @@ app.get('/api/stats', (_req: Request, res: Response) => {
   }
 });
 
-// Ward & Janpad Live Stats
-app.get('/api/stats/wards', (_req: Request, res: Response) => {
+// Ward & Janpad Live Stats (Admin-protected)
+app.get('/api/stats/wards', requireAdmin, (_req: Request, res: Response) => {
   try {
     const live = dbService.getWardAndBlockLiveStats();
     res.json(live);
@@ -161,8 +241,8 @@ app.get('/api/stats/wards', (_req: Request, res: Response) => {
   }
 });
 
-// Notifications List
-app.get('/api/notifications', (req: Request, res: Response) => {
+// Notifications List (Admin-protected for full operational feed)
+app.get('/api/notifications', requireAdmin, (req: Request, res: Response) => {
   try {
     const parsedLimit = req.query.limit ? Number(req.query.limit) : 30;
     const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? Math.min(200, Math.floor(parsedLimit)) : 30;
@@ -174,8 +254,8 @@ app.get('/api/notifications', (req: Request, res: Response) => {
   }
 });
 
-// Post Notification (Admin Broadcast)
-app.post('/api/notifications', (req: Request, res: Response) => {
+// Post Notification (Admin Broadcast - strictly Admin-protected)
+app.post('/api/notifications', requireAdmin, (req: Request, res: Response) => {
   try {
     const { type, message, messageHindi, wardOrBlock, amount, arn } = req.body || {};
     if (!message || !String(message).trim()) {
@@ -284,8 +364,8 @@ app.get('/api/schemes/:id', (req: Request, res: Response) => {
   }
 });
 
-// Create/Insert Scheme (Live Admin Broadcast)
-app.post('/api/schemes', (req: Request, res: Response) => {
+// Create/Insert Scheme (Live Admin Broadcast - strictly Admin-protected)
+app.post('/api/schemes', requireAdmin, (req: Request, res: Response) => {
   try {
     const scheme = (req.body || {}) as Scheme;
     if (!scheme.id || !scheme.title) {
@@ -313,8 +393,8 @@ app.post('/api/schemes', (req: Request, res: Response) => {
   }
 });
 
-// Update Scheme
-app.put('/api/schemes/:id', (req: Request, res: Response) => {
+// Update Scheme (strictly Admin-protected)
+app.put('/api/schemes/:id', requireAdmin, (req: Request, res: Response) => {
   try {
     const scheme = (req.body || {}) as Scheme;
     if (!scheme.title) {
@@ -331,8 +411,8 @@ app.put('/api/schemes/:id', (req: Request, res: Response) => {
   }
 });
 
-// Delete Scheme
-app.delete('/api/schemes/:id', (req: Request, res: Response) => {
+// Delete Scheme (strictly Admin-protected)
+app.delete('/api/schemes/:id', requireAdmin, (req: Request, res: Response) => {
   try {
     const deleted = dbService.deleteScheme(req.params.id);
     if (!deleted) {
@@ -349,28 +429,39 @@ app.delete('/api/schemes/:id', (req: Request, res: Response) => {
 
 // ================= APPLICATIONS CRUD =================
 
-// Get Applications (all, by ARN, or by Samagra ID)
-app.get('/api/applications', (req: Request, res: Response) => {
-  try {
-    const { arn, samagraId, status } = req.query;
-    const records = dbService.getApplications({
-      arn: arn ? String(arn) : undefined,
-      samagraId: samagraId ? String(samagraId) : undefined,
-      status: status ? String(status) : undefined,
-    });
+// Get Applications:
+// - Filtered by specific `arn` or `samagraId`: Citizen-scoped lookup allowed
+// - Unfiltered district-wide list: strictly requires Admin authentication
+app.get('/api/applications', (req: Request, res: Response, next: NextFunction) => {
+  const { arn, samagraId, status } = req.query;
+  const hasScopedFilter = Boolean((arn && String(arn).trim()) || (samagraId && String(samagraId).trim()));
 
-    if (arn && records.length === 0) {
-      return res.status(404).json({ error: 'Application Reference Number (ARN) not found' });
-    }
-    if (arn) {
-      return res.json({ record: records[0] });
-    }
+  const handleQuery = () => {
+    try {
+      const records = dbService.getApplications({
+        arn: arn ? String(arn).trim() : undefined,
+        samagraId: samagraId ? String(samagraId).trim() : undefined,
+        status: status ? String(status).trim() : undefined,
+      });
 
-    res.json({ records, count: records.length });
-  } catch (err) {
-    console.error('[API GET /api/applications] Error:', err);
-    res.status(500).json({ error: 'Failed to load applications' });
+      if (arn && records.length === 0) {
+        return res.status(404).json({ error: 'Application Reference Number (ARN) not found' });
+      }
+      if (arn) {
+        return res.json({ record: records[0] });
+      }
+
+      res.json({ records, count: records.length });
+    } catch (err) {
+      console.error('[API GET /api/applications] Error:', err);
+      res.status(500).json({ error: 'Failed to load applications' });
+    }
+  };
+
+  if (!hasScopedFilter) {
+    return requireAdmin(req, res, handleQuery);
   }
+  return handleQuery();
 });
 
 // Get Application by ARN
@@ -503,8 +594,8 @@ app.post('/api/applications', (req: Request, res: Response) => {
   }
 });
 
-// Update Application Status (Admin live approval / disbursement)
-app.patch('/api/applications/:arn', (req: Request, res: Response) => {
+// Update Application Status (Admin live approval / disbursement - strictly Admin-protected)
+app.patch('/api/applications/:arn', requireAdmin, (req: Request, res: Response) => {
   try {
     const { status, remarks } = req.body || {};
     const allowedStatuses: ApplicationRecord['currentStatus'][] = [
@@ -552,8 +643,8 @@ app.patch('/api/applications/:arn', (req: Request, res: Response) => {
 
 // ================= SAMAGRA LIVE INTEGRATION =================
 
-// List all live registered Samagra households
-app.get('/api/samagra', (_req: Request, res: Response) => {
+// List all live registered Samagra households (strictly Admin-protected)
+app.get('/api/samagra', requireAdmin, (_req: Request, res: Response) => {
   try {
     const families = dbService.getAllSamagraFamilies();
     res.json({ families, count: families.length });
