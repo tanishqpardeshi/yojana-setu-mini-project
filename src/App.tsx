@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Building2, ShieldCheck, ShieldAlert, LogOut, Loader2, Lock } from 'lucide-react';
+import { Building2, ShieldCheck, ShieldAlert, LogOut, Loader2, Lock, Filter, RotateCcw } from 'lucide-react';
 import {
   SupportedLanguage,
   CitizenAccountProfile,
@@ -18,8 +18,14 @@ import {
   VerifiedDocumentMeta,
 } from './types';
 import { searchSchemes } from './utils/searchEngine';
-import { rankSchemesForCitizen } from './utils/rulesEngine';
+import { evaluateSchemeEligibility, rankSchemesForCitizen } from './utils/rulesEngine';
 import { createEmptyCitizenProfile, evaluateSchemesRealtimeStatus } from './utils/liveDataEngine';
+import {
+  getCategoryLabel,
+  getGenderLabel,
+  getOccupationLabel,
+  pickText,
+} from './utils/i18n';
 import {
   ADMIN_DASHBOARD_ROUTE,
   ADMIN_LOGIN_ROUTE,
@@ -197,6 +203,7 @@ export default function App() {
 
   // Clean unlinked initial citizen profile (zero demo defaults)
   const [citizenProfile, setCitizenProfile] = useState<CitizenProfile>(() => createEmptyCitizenProfile());
+  const [isProfileFilterApplied, setIsProfileFilterApplied] = useState(false);
   const [digiLockerCredentials, setDigiLockerCredentials] = useState<DigiLockerCredentialRecord[]>([]);
   const [digiLockerOAuthMeta, setDigiLockerOAuthMeta] = useState<{
     oauthConfigured: boolean;
@@ -1329,13 +1336,89 @@ export default function App() {
     fetchAdminDistrictData();
   };
 
-  // Filter schemes according to active search query & selected governance level
-  const filteredSchemes = searchSchemes(searchQuery, schemes, {
-    levelFilter: selectedLevel,
-  });
+  // Schemes matching the user's applied Citizen Profile criteria (all rules passed: eligible or likely)
+  const criteriaMatchedSchemes = useMemo(() => {
+    return schemes.filter(
+      scheme => evaluateSchemeEligibility(citizenProfile, scheme).status !== 'not_eligible'
+    );
+  }, [citizenProfile, schemes]);
+
+  const webpageSchemes = isProfileFilterApplied ? criteriaMatchedSchemes : schemes;
+
+  // Filter schemes according to active search query, selected governance level & applied user criteria
+  const filteredSchemes = useMemo(
+    () =>
+      searchSchemes(searchQuery, webpageSchemes, {
+        levelFilter: selectedLevel,
+      }),
+    [searchQuery, webpageSchemes, selectedLevel]
+  );
 
   // Compute eligibility results for active citizen profile
-  const eligibilityResults = rankSchemesForCitizen(citizenProfile, schemes);
+  const eligibilityResults = useMemo(
+    () => rankSchemesForCitizen(citizenProfile, schemes),
+    [citizenProfile, schemes]
+  );
+
+  const handleApplyProfileFilter = useCallback(
+    (nextProfile: CitizenProfile) => {
+      setCitizenProfile(nextProfile);
+      setIsProfileFilterApplied(true);
+      const matchedCount = schemes.filter(
+        s => evaluateSchemeEligibility(nextProfile, s).status !== 'not_eligible'
+      ).length;
+      showToast({
+        type: 'success',
+        title: pickText(currentLanguage, {
+          en: 'Criteria Filter Applied',
+          hi: 'पात्रता फ़िल्टर लागू हुआ',
+          malwi: 'थारो फ़िल्टर लागू हो गयो छे',
+        }),
+        message: pickText(currentLanguage, {
+          en: `Showing ${matchedCount} scheme${matchedCount === 1 ? '' : 's'} matching your profile across the platform.`,
+          hi: `पूरे पोर्टल पर आपके मापदंड से मेल खाती ${matchedCount} योजनाएं दिखाई जा रही हैं।`,
+          malwi: `पूरा पेज पर थारी जानकारी मुजब ${matchedCount} पात्र योजना दिख री छे।`,
+        }),
+      });
+    },
+    [schemes, currentLanguage, showToast]
+  );
+
+  const handleClearProfileFilter = useCallback(() => {
+    setIsProfileFilterApplied(false);
+    showToast({
+      type: 'info',
+      title: pickText(currentLanguage, {
+        en: 'Filter Cleared',
+        hi: 'फ़िल्टर हटाया गया',
+        malwi: 'फ़िल्टर हट गयो छे',
+      }),
+      message: pickText(currentLanguage, {
+        en: `Showing all ${schemes.length} active Indore District schemes.`,
+        hi: `इंदौर जिले की सभी ${schemes.length} सक्रिय योजनाएं दिखाई जा रही हैं।`,
+        malwi: `इंदौर जिला री सगळी ${schemes.length} चालू योजना दिख री छे।`,
+      }),
+    });
+  }, [schemes.length, currentLanguage, showToast]);
+
+  const handleResetAllSearchCriteria = useCallback(() => {
+    setSearchQuery('');
+    setSelectedLevel('all');
+    setIsProfileFilterApplied(false);
+    showToast({
+      type: 'info',
+      title: pickText(currentLanguage, {
+        en: 'Search Criteria Reset',
+        hi: 'खोज मापदंड रीसेट किए गए',
+        malwi: 'खोज रा नियम पाछा साफ हो गया',
+      }),
+      message: pickText(currentLanguage, {
+        en: 'Modify your search criteria or browse all active Indore & MP schemes.',
+        hi: 'आप अब नए खोज मापदंड दर्ज कर सकते हैं या सभी योजनाएं देख सकते हैं।',
+        malwi: 'अब तमे नवा खोज रा नियम डाल सको या सगळी योजना देख सको।',
+      }),
+    });
+  }, [currentLanguage, showToast]);
 
   // ================= DEDICATED ADMIN LOGIN ROUTE (/admin/login) =================
   if (isAdminLoginPath(pathname)) {
@@ -1435,8 +1518,15 @@ export default function App() {
   }
 
   // ================= PUBLIC / CITIZEN PORTAL =================
+  const t = (en: string, hi: string, malwi: string) =>
+    pickText(currentLanguage, { en, hi, malwi });
+
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-heading">
+    <div
+      className={`min-h-screen bg-slate-50 text-slate-900 flex flex-col overflow-x-hidden ${
+        currentLanguage === 'en' ? 'font-heading' : 'font-devanagari'
+      }`}
+    >
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       {/* Citizen-Only Header (Zero Admin Mode Switcher or Admin Links) */}
       <Header
@@ -1450,6 +1540,58 @@ export default function App() {
         savedSchemesCount={savedSchemes.length}
         onOpenSavedSchemes={() => setIsSavedSchemesOpen(true)}
       />
+
+      {/* Global Active Profile Filter Bar across the entire webpage */}
+      {isProfileFilterApplied && (
+        <div className="bg-emerald-900 text-emerald-50 border-b border-emerald-800 no-print">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 font-bold text-amber-300">
+                <Filter className="w-3.5 h-3.5" />
+                <span>
+                  {t(
+                    `Active Profile Filter (${criteriaMatchedSchemes.length} Matching Schemes):`,
+                    `सक्रिय पात्रता फ़िल्टर (${criteriaMatchedSchemes.length} मेल खाती योजनाएं):`,
+                    `थारो फ़िल्टर लागू छे (${criteriaMatchedSchemes.length} पात्र योजना मिल्या):`
+                  )}
+                </span>
+              </span>
+              <span className="bg-emerald-800/90 border border-emerald-700 px-2 py-0.5 rounded-md font-medium">
+                {t('Age:', 'आयु:', 'उमर:')} {citizenProfile.age} {t('yrs', 'वर्ष', 'साल')}
+              </span>
+              <span className="bg-emerald-800/90 border border-emerald-700 px-2 py-0.5 rounded-md font-medium">
+                {t('Income:', 'आय:', 'कमाई:')} ₹{citizenProfile.annualIncome.toLocaleString('en-IN')}
+              </span>
+              <span className="bg-emerald-800/90 border border-emerald-700 px-2 py-0.5 rounded-md font-medium">
+                {getGenderLabel(citizenProfile.gender, currentLanguage)}
+              </span>
+              <span className="bg-emerald-800/90 border border-emerald-700 px-2 py-0.5 rounded-md font-medium">
+                {getOccupationLabel(citizenProfile.occupation, currentLanguage)}
+              </span>
+              <span className="bg-emerald-800/90 border border-emerald-700 px-2 py-0.5 rounded-md font-medium">
+                {getCategoryLabel(citizenProfile.category, currentLanguage)}
+              </span>
+              <span className="bg-emerald-800/90 border border-emerald-700 px-2 py-0.5 rounded-md font-medium">
+                {citizenProfile.areaType === 'urban'
+                  ? t(
+                      `IMC Ward ${citizenProfile.wardNumber || 1}`,
+                      `निगम वार्ड ${citizenProfile.wardNumber || 1}`,
+                      `शहर वार्ड ${citizenProfile.wardNumber || 1}`
+                    )
+                  : `${citizenProfile.blockName || 'Indore'} ${t('Janpad', 'जनपद', 'जनपद')}`}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={handleClearProfileFilter}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white font-bold transition cursor-pointer shrink-0"
+            >
+              <RotateCcw className="w-3 h-3" />
+              <span>{t('Reset Filter', 'फ़िल्टर हटाएं', 'फ़िल्टर हटावो')}</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Security / RBAC Block Banner when a Citizen tries to open /admin */}
       {citizenSecurityBanner && (
@@ -1493,6 +1635,9 @@ export default function App() {
                 setIsComparisonOpen(true);
               }}
               totalSchemesCount={filteredSchemes.length}
+              isProfileFilterApplied={isProfileFilterApplied}
+              onClearProfileFilter={handleClearProfileFilter}
+              onResetAllCriteria={handleResetAllSearchCriteria}
             />
 
             <div id="eligibility-calculator-section">
@@ -1510,6 +1655,12 @@ export default function App() {
                 onRunSchemesRealtimeCheck={handleRunSchemesRealtimeCheck}
                 savedSchemeIds={savedSchemes.map(s => s.schemeId)}
                 onToggleSaveScheme={handleToggleSaveScheme}
+                isProfileFilterApplied={isProfileFilterApplied}
+                onApplyProfileFilter={handleApplyProfileFilter}
+                onClearProfileFilter={handleClearProfileFilter}
+                searchQuery={searchQuery}
+                selectedLevel={selectedLevel}
+                onResetAllCriteria={handleResetAllSearchCriteria}
               />
             </div>
           </div>
@@ -1518,7 +1669,9 @@ export default function App() {
         {activeTab === 'governance' && (
           <GovernanceLevelsView
             currentLanguage={currentLanguage}
-            schemes={schemes}
+            schemes={webpageSchemes}
+            isProfileFilterApplied={isProfileFilterApplied}
+            onClearProfileFilter={handleClearProfileFilter}
             onSelectLevel={(lvl: GovernanceLevel) => {
               setSelectedLevel(lvl);
               handleSelectCitizenTab('schemes');
@@ -1529,7 +1682,7 @@ export default function App() {
         {activeTab === 'samagra' && (
           <SamagraFamilyView
             currentLanguage={currentLanguage}
-            schemes={schemes}
+            schemes={webpageSchemes}
             activeFamilyId={citizenProfile.samagraFamilyId}
             activeMemberId={citizenProfile.samagraMemberId}
             onSelectMemberForProfile={handleSelectMemberForProfile}
@@ -1589,6 +1742,7 @@ export default function App() {
       <ApplicationIntakeModal
         scheme={intakeScheme}
         profile={citizenProfile}
+        currentLanguage={currentLanguage}
         isOpen={intakeScheme !== null}
         onClose={() => setIntakeScheme(null)}
         onSubmit={handleApplicationSubmit}
@@ -1607,7 +1761,7 @@ export default function App() {
       <SchemeComparisonModal
         isOpen={isComparisonOpen}
         onClose={() => setIsComparisonOpen(false)}
-        schemes={schemes}
+        schemes={webpageSchemes.length > 0 ? webpageSchemes : schemes}
         currentLanguage={currentLanguage}
         initialSchemeId={comparisonInitialId}
       />
@@ -1618,20 +1772,21 @@ export default function App() {
         onClose={() => setIsSavedSchemesOpen(false)}
         savedSchemes={savedSchemes}
         allSchemes={schemes}
+        currentLanguage={currentLanguage}
         onRemoveScheme={schemeId => {
           if (activeCitizenFirebaseUser) {
             removeSavedSchemeFromUserFirestore(activeCitizenFirebaseUser.uid, schemeId)
               .then(() => {
                 showToast({
                   type: 'info',
-                  title: 'Bookmark Removed',
-                  message: 'Removed scheme from your saved list.',
+                  title: t('Bookmark Removed', 'बुकमार्क हटाया गया', 'योजना सूची सूं हटाई'),
+                  message: t('Removed scheme from your saved list.', 'योजना आपकी सहेजी सूची से हटाई गई।', 'योजना थारी संभाली सूची सूं हटा दी।'),
                 });
               })
               .catch(err => {
                 showToast({
                   type: 'error',
-                  title: 'Remove Failed',
+                  title: t('Remove Failed', 'हटाने में त्रुटि', 'हटावण मां दिक्कत आई'),
                   message:
                     err instanceof Error ? err.message : 'Failed to remove saved scheme.',
                 });
@@ -1650,7 +1805,7 @@ export default function App() {
                 if (!parsed.ok) {
                   showToast({
                     type: 'error',
-                    title: 'Remove Failed',
+                    title: t('Remove Failed', 'हटाने में त्रुटि', 'हटावण मां दिक्कत आई'),
                     message: parsed.errorInfo?.error || 'Failed to remove saved scheme.',
                     details: parsed.errorInfo?.details,
                   });
@@ -1660,15 +1815,15 @@ export default function App() {
                   setSavedSchemes(parsed.data.items);
                   showToast({
                     type: 'info',
-                    title: 'Bookmark Removed',
-                    message: 'Removed scheme from your saved list.',
+                    title: t('Bookmark Removed', 'बुकमार्क हटाया गया', 'योजना सूची सूं हटाई'),
+                    message: t('Removed scheme from your saved list.', 'योजना आपकी सहेजी सूची से हटाई गई।', 'योजना थारी संभाली सूची सूं हटा दी।'),
                   });
                 }
               })
               .catch(err => {
                 showToast({
                   type: 'error',
-                  title: 'Remove Failed',
+                  title: t('Remove Failed', 'हटाने में त्रुटि', 'हटावण मां दिक्कत आई'),
                   message:
                     err instanceof Error ? err.message : 'Failed to remove saved scheme.',
                 });
@@ -1681,60 +1836,93 @@ export default function App() {
         userEmail={activeCitizenHeaderUser?.email}
       />
 
-      {/* Official Civic Footer (No Admin Links) */}
-      <footer className="bg-slate-900 text-slate-300 py-10 border-t border-slate-800 no-print">
+      {/* Official Civic Footer (No Admin Links, safe bottom clearance for mobile tab bar) */}
+      <footer className="bg-slate-900 text-slate-300 pt-10 pb-24 lg:pb-10 border-t border-slate-800 no-print">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid grid-cols-1 md:grid-cols-4 gap-8 text-xs">
           <div className="space-y-3">
             <div className="flex items-center space-x-2 text-white font-bold text-base font-heading">
               <Building2 className="w-5 h-5 text-amber-500" />
-              <span>YojanaSetu Indore</span>
+              <span>{t('YojanaSetu Indore', 'योजनासेतु इंदौर', 'योजनासेतु आपणो इंदौर')}</span>
             </div>
             <p className="text-slate-400 leading-relaxed">
-              Real-time, centralized government scheme discovery &amp; citizen entitlement platform for the citizens of Indore District and Madhya Pradesh.
+              {t(
+                'Real-time, centralized government scheme discovery & citizen entitlement platform for the citizens of Indore District and Madhya Pradesh.',
+                'इंदौर जिले एवं मध्य प्रदेश के नागरिकों हेतु एकीकृत सरकारी योजना खोज एवं पात्रता मंच।',
+                'इंदौर जिला अने मध्य प्रदेश रा सगळा भाई-बहनों खातर एक ही जगह सरकारी योजना खोजण अने हक पावण रो मंच।'
+              )}
             </p>
             <div className="text-[11px] text-amber-400 font-mono">
-              IMC Wards 1-85 • Janpads: Indore, Mhow, Sanwer, Depalpur
+              {t(
+                'IMC Wards 1-85 • Janpads: Indore, Mhow, Sanwer, Depalpur',
+                'नगर निगम वार्ड 1-85 • जनपद: इंदौर, महू, सांवेर, देपालपुर',
+                'निगम वार्ड 1-85 • गाँव जनपद: इंदौर, महू, सांवेर, देपालपुर'
+              )}
             </div>
           </div>
 
           <div>
-            <h5 className="font-bold text-white text-xs uppercase tracking-wider mb-3">Governance Tiers</h5>
+            <h5 className="font-bold text-white text-xs uppercase tracking-wider mb-3">
+              {t('Governance Tiers', 'शासन के 6 स्तर', 'सरकार रा 6 स्तर')}
+            </h5>
             <ul className="space-y-1.5 text-slate-400">
-              <li>Level 1: International &amp; ADB Infra</li>
-              <li>Level 2: National / Central Sector</li>
-              <li>Level 3: Madhya Pradesh State</li>
-              <li>Level 4: Indore Collectorate</li>
-              <li>Level 5: IMC Urban Wards (1-85)</li>
-              <li>Level 6: Rural Janpad Panchayats</li>
+              <li>{t('Level 1: International & ADB Infra', 'स्तर 1: अंतर्राष्ट्रीय व ADB परियोजना', 'स्तर 1: अंतर्राष्ट्रीय व बड़ी मदद')}</li>
+              <li>{t('Level 2: National / Central Sector', 'स्तर 2: राष्ट्रीय / केंद्र सरकार', 'स्तर 2: केंद्र सरकार री योजना')}</li>
+              <li>{t('Level 3: Madhya Pradesh State', 'स्तर 3: मध्य प्रदेश राज्य शासन', 'स्तर 3: म.प्र. सरकार री योजना')}</li>
+              <li>{t('Level 4: Indore Collectorate', 'स्तर 4: इंदौर कलेक्ट्रेट', 'स्तर 4: इंदौर कलेक्टर दफ्तर')}</li>
+              <li>{t('Level 5: IMC Urban Wards (1-85)', 'स्तर 5: इंदौर नगर निगम वार्ड (1-85)', 'स्तर 5: इंदौर नगर निगम वार्ड (1-85)')}</li>
+              <li>{t('Level 6: Rural Janpad Panchayats', 'स्तर 6: ग्रामीण जनपद पंचायतें', 'स्तर 6: गाँव री जनपद पंचायत')}</li>
             </ul>
           </div>
 
           <div>
-            <h5 className="font-bold text-white text-xs uppercase tracking-wider mb-3">District Helplines</h5>
+            <h5 className="font-bold text-white text-xs uppercase tracking-wider mb-3">
+              {t('District Helplines', 'जिला हेल्पलाइन नंबर', 'जिला मदद नंबर')}
+            </h5>
             <ul className="space-y-1.5 text-slate-400">
-              <li>CM Helpline MP: <strong className="text-white font-mono">181</strong></li>
-              <li>Indore 311 Municipal: <strong className="text-white font-mono">311</strong></li>
-              <li>Indore Collectorate: <strong className="text-white font-mono">0731-2433833</strong></li>
-              <li>Ayushman Bharat: <strong className="text-white font-mono">14555</strong></li>
-              <li>PM-KISAN Nodal: <strong className="text-white font-mono">155261</strong></li>
+              <li>{t('CM Helpline MP:', 'सीएम हेल्पलाइन म.प्र.:', 'सीएम मदद नंबर:')} <strong className="text-white font-mono">181</strong></li>
+              <li>{t('Indore 311 Municipal:', 'इंदौर 311 नगर निगम:', 'इंदौर नगर निगम मदद:')} <strong className="text-white font-mono">311</strong></li>
+              <li>{t('Indore Collectorate:', 'इंदौर कलेक्ट्रेट:', 'इंदौर कलेक्टर दफ्तर:')} <strong className="text-white font-mono">0731-2433833</strong></li>
+              <li>{t('Ayushman Bharat:', 'आयुष्मान भारत:', 'आयुष्मान इलाज मदद:')} <strong className="text-white font-mono">14555</strong></li>
+              <li>{t('PM-KISAN Nodal:', 'पीएम-किसान नोडल:', 'पीएम-किसान मदद:')} <strong className="text-white font-mono">155261</strong></li>
             </ul>
           </div>
 
           <div>
-            <h5 className="font-bold text-white text-xs uppercase tracking-wider mb-3">Official Offices</h5>
+            <h5 className="font-bold text-white text-xs uppercase tracking-wider mb-3">
+              {t('Official Offices', 'आधिकारिक कार्यालय', 'सरकारी दफ्तर रो पतो')}
+            </h5>
             <p className="text-slate-400 leading-relaxed">
-              District Collector Office, Moti Tabela, Indore 452007<br />
-              Indore Municipal Corporation HQ, Narayan Singla Marg, Indore 452001
+              {t(
+                'District Collector Office, Moti Tabela, Indore 452007',
+                'जिला कलेक्टर कार्यालय, मोती तबेला, इंदौर 452007',
+                'जिला कलेक्टर दफ्तर, मोती तबेला, इंदौर 452007'
+              )}
+              <br />
+              {t(
+                'Indore Municipal Corporation HQ, Narayan Singla Marg, Indore 452001',
+                'इंदौर नगर निगम मुख्यालय, नारायण सिंगला मार्ग, इंदौर 452001',
+                'इंदौर नगर निगम मुख्यालय, नारायण सिंगला मार्ग, इंदौर 452001'
+              )}
             </p>
             <div className="mt-3 flex items-center space-x-1 text-emerald-400 font-semibold">
               <ShieldCheck className="w-3.5 h-3.5" />
-              <span>Powered by NIC &amp; MP State IT Policy</span>
+              <span>
+                {t(
+                  'Powered by NIC & MP State IT Policy',
+                  'एनआईसी एवं म.प्र. राज्य आईटी नीति द्वारा संचालित',
+                  'एनआईसी अने म.प्र. सरकार री डिजिटल सेवा'
+                )}
+              </span>
             </div>
           </div>
         </div>
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 pt-6 border-t border-slate-800 text-center text-[11px] text-slate-500">
-          © 2026 YojanaSetu • District Administration Indore &amp; Indore Municipal Corporation.
+          {t(
+            '© 2026 YojanaSetu • District Administration Indore & Indore Municipal Corporation.',
+            '© 2026 योजनासेतु • जिला प्रशासन इंदौर एवं इंदौर नगर निगम।',
+            '© 2026 योजनासेतु • इंदौर जिला प्रशासन अने इंदौर नगर निगम।'
+          )}
         </div>
       </footer>
     </div>

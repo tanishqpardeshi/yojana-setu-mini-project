@@ -13,35 +13,68 @@ import {
 import type { JanpadBlockInfo, WardInfo } from '../data/indoreGovernance';
 
 export const OFFICIAL_SCHEME_PORTAL_URLS: Record<string, string> = {
-  // Flagship direct scheme portals
+  // Level 1: International & Multilateral (4 Schemes)
+  adb_mpusp_water: 'https://www.mpudc.co.in/',
+  wb_mprcp_rural_connect: 'https://mprrda.mp.gov.in/',
+  unicef_poshan_mitr: 'https://mpwcdmis.gov.in/',
+  gef_clean_indore_mobility: 'https://smartcityindore.org/',
+
+  // Level 2: National / Central Government (14 Schemes)
   pm_kisan: 'https://pmkisan.gov.in/',
   pmay_urban: 'https://pmaymis.gov.in/',
   pmay_gramin: 'https://pmayg.nic.in/',
   ayushman_bharat: 'https://pmjay.gov.in/',
   pm_svanidhi: 'https://pmsvanidhi.mohua.gov.in/',
   pm_vishwakarma: 'https://pmvishwakarma.gov.in/',
-  pm_fasal_bima: 'https://pmfby.gov.in/',
-  pm_kusum: 'https://pmkusum.mnre.gov.in/',
-  pm_ujjwala: 'https://www.pmuy.gov.in/',
-  pm_matru_vandana: 'https://pmmvy.wcd.gov.in/',
-  pm_mudra: 'https://www.mudra.org.in/',
   pm_surya_ghar: 'https://pmsuryaghar.gov.in/',
+  pmfby_crop_insurance: 'https://pmfby.gov.in/',
+  mgnrega_indore: 'https://nrega.nic.in/',
+  pm_kusum_solar_pump: 'https://pmkusum.mnre.gov.in/',
+  day_nrlm_aajeevika: 'https://aajeevika.gov.in/',
+  pm_mudra_yojana: 'https://www.mudra.org.in/',
   sukanya_samriddhi: 'https://www.nsiindia.gov.in/',
-  atal_pension: 'https://www.npscra.nsdl.co.in/',
+  pmfme_food_processing: 'https://pmfme.mofpi.gov.in/',
+
+  // Level 3: Madhya Pradesh State Government (16 Schemes)
   mp_ladli_behna: 'https://cmladlibahna.mp.gov.in/',
   mp_ladli_laxmi: 'https://ladlilaxmi.mp.gov.in/',
   mp_kisan_kalyan: 'https://saara.mp.gov.in/',
   mp_sambal_2: 'https://sambal.mp.gov.in/',
   mp_seekho_kamao: 'https://mmsky.mp.gov.in/',
-  mp_gaav_ki_beti: 'https://scholarshipportal.mp.nic.in/',
-  mp_medhavi_vidyarthi: 'https://scholarshipportal.mp.nic.in/',
   mp_kanya_vivah: 'https://vivahportal.mp.gov.in/',
+  mp_medhavi_vidyarthi: 'https://scholarshipportal.mp.nic.in/',
   mp_udyam_kranti: 'https://samast.mponline.gov.in/',
-  mp_social_pension: 'https://socialsecurity.mp.gov.in/',
-  adb_mpusp_water: 'https://www.mpudc.co.in/',
-  wb_mprcp_rural_connect: 'https://mprrda.mp.gov.in/',
-  unicef_poshan_mitr: 'https://mpwcdmis.gov.in/',
-  gef_clean_indore_mobility: 'https://smartcityindore.org/',
+  mp_krishak_mitra_solar: 'https://energy.mp.gov.in/',
+  mp_teerth_darshan: 'https://dharmasva.mp.gov.in/',
+  mp_gaon_ki_beti: 'https://scholarshipportal.mp.nic.in/',
+  mp_pratibha_kiran: 'https://scholarshipportal.mp.nic.in/',
+  mp_post_matric_scholarship: 'https://www.tribal.mp.gov.in/MPTAAS',
+  mp_kalyani_vridha_pension: 'https://socialsecurity.mp.gov.in/',
+  mp_rani_durgavati_livelihood: 'https://mpurban.gov.in/',
+  mp_ration_aapke_gram: 'https://food.mp.gov.in/',
+
+  // Level 4: District Collectorate Indore (6 Schemes)
+  indore_redcross_arogya: 'https://indore.nic.in/',
+  indore_ahilya_divyang: 'https://socialjustice.mp.gov.in/',
+  indore_jal_hath_recharge: 'https://indore.nic.in/',
+  indore_tribal_livelihood_grant: 'https://www.tribal.mp.gov.in/',
+  indore_district_innovation_voucher: 'https://startup.mp.gov.in/',
+  indore_ahilya_annapurna_meals: 'https://indore.nic.in/',
+
+  // Level 5: Indore Municipal Corporation — IMC Wards 1-85 (5 Schemes)
+  imc_swachhata_mitr: 'https://imcindore.mp.gov.in/',
+  imc_rooftop_solar: 'https://imcindore.mp.gov.in/',
+  imc_pink_vending_zone: 'https://imcindore.mp.gov.in/',
+  imc_rainwater_harvesting_rebate: 'https://www.mpenagarpalika.gov.in/',
+  imc_ev_charging_grant: 'https://smartcityindore.org/',
+
+  // Level 6: Rural Janpad Panchayats & Corridors (6 Schemes)
+  janpad_malwi_cow_dairy: 'https://mpdah.gov.in/',
+  janpad_mhow_bamboo_forest: 'https://mpforest.gov.in/',
+  janpad_sanwer_onion_storage: 'https://mpfsts.mp.gov.in/',
+  janpad_indore_custom_hiring: 'https://mpkrishi.mp.gov.in/',
+  corridor_pithampur_rural_skill: 'https://invest.mp.gov.in/',
+  corridor_ujjain_mandi_logistics: 'https://mpmandiboard.gov.in/',
 };
 
 export const GOVERNANCE_LEVEL_DEFAULT_PORTALS: Record<GovernanceLevel, string> = {
@@ -53,11 +86,28 @@ export const GOVERNANCE_LEVEL_DEFAULT_PORTALS: Record<GovernanceLevel, string> =
   rural_janpad: 'https://prd.mp.gov.in/',
 };
 
-export function resolveSchemePortalUrl(scheme: Pick<Scheme, 'id' | 'governanceLevel' | 'applyUrl'>): string {
+export function resolveSchemePortalUrl(
+  scheme: Pick<Scheme, 'id' | 'governanceLevel' | 'applyUrl'> & { dataOrigin?: Scheme['dataOrigin'] }
+): string {
+  if (scheme.dataOrigin === 'admin_live' && scheme.applyUrl && /^https?:\/\//i.test(scheme.applyUrl)) {
+    return scheme.applyUrl;
+  }
+  if (OFFICIAL_SCHEME_PORTAL_URLS[scheme.id]) {
+    return OFFICIAL_SCHEME_PORTAL_URLS[scheme.id];
+  }
   if (scheme.applyUrl && /^https?:\/\//i.test(scheme.applyUrl)) {
     return scheme.applyUrl;
   }
-  return OFFICIAL_SCHEME_PORTAL_URLS[scheme.id] || GOVERNANCE_LEVEL_DEFAULT_PORTALS[scheme.governanceLevel];
+  return GOVERNANCE_LEVEL_DEFAULT_PORTALS[scheme.governanceLevel];
+}
+
+export function getOfficialPortalDisplayHost(scheme: Pick<Scheme, 'id' | 'governanceLevel' | 'applyUrl'>): string {
+  const url = resolveSchemePortalUrl(scheme);
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return url;
+  }
 }
 
 export function createEmptyCitizenProfile(): CitizenProfile {

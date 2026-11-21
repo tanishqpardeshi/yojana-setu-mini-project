@@ -52,6 +52,18 @@ export interface EligibilityRules {
 
 export type PortalReachabilityStatus = 'unchecked' | 'reachable' | 'unreachable' | 'timeout';
 
+export interface ApplicationProcedureInfo {
+  mode: string;
+  modeHindi: string;
+  modeMalwi: string;
+  estimatedTime: string;
+  estimatedTimeHindi: string;
+  estimatedTimeMalwi: string;
+  steps: string[];
+  stepsHindi: string[];
+  stepsMalwi: string[];
+}
+
 export interface Scheme {
   id: string;
   code: string;
@@ -77,6 +89,7 @@ export interface Scheme {
   tags: string[];
   malwiSynonyms: string[];
   applyUrl?: string;
+  applicationProcedure?: ApplicationProcedureInfo;
   cscAvailable: boolean;
   activeBudgetCr?: number;
   updatedAt?: string;
@@ -118,6 +131,7 @@ export interface DigiLockerCredentialRecord {
   id: string;
   citizenId: string;
   docId?: string;
+  docType?: string;
   docUri: string;
   docName: string;
   docNumber?: string;
@@ -218,6 +232,7 @@ export interface RuleEvaluationResult {
   passed: boolean;
   reason: string;
   reasonHindi: string;
+  reasonMalwi?: string;
 }
 
 export interface SchemeEligibilityResult {

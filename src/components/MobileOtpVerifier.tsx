@@ -10,6 +10,8 @@ import {
 import { parseApiResponse } from '../utils/apiClient';
 import { validateIndianMobile } from '../utils/samagraValidator';
 import { ToastItem } from './ToastContainer';
+import { SupportedLanguage } from '../types';
+import { pickText } from '../utils/i18n';
 
 interface MobileOtpVerifierProps {
   value: string;
@@ -21,6 +23,7 @@ interface MobileOtpVerifierProps {
   required?: boolean;
   disabled?: boolean;
   label?: string;
+  currentLanguage?: SupportedLanguage;
   onNotify?: (toast: Omit<ToastItem, 'id'>) => void;
 }
 
@@ -32,9 +35,16 @@ export const MobileOtpVerifier: React.FC<MobileOtpVerifierProps> = ({
   authToken,
   required = false,
   disabled = false,
-  label = 'Mobile Number (+91 India)',
+  label,
+  currentLanguage = 'en',
   onNotify,
 }) => {
+  const t = (en: string, hi: string, malwi: string) =>
+    pickText(currentLanguage, { en, hi, malwi });
+  const resolvedLabel =
+    label ||
+    t('Mobile Number (+91 India)', 'मोबाइल नंबर (+91 भारत)', 'मोबाइल नंबर (+91 भारत)');
+
   const [sendingOtp, setSendingOtp] = useState(false);
   const [verifyingOtp, setVerifyingOtp] = useState(false);
   const [otpSent, setOtpSent] = useState(false);
@@ -78,7 +88,7 @@ export const MobileOtpVerifier: React.FC<MobileOtpVerifierProps> = ({
       setInlineError(msg);
       onNotify?.({
         type: 'warning',
-        title: 'Invalid Mobile Number',
+        title: t('Invalid Mobile Number', 'अमान्य मोबाइल नंबर', 'गलत मोबाइल नंबर'),
         message: msg,
       });
       return;
@@ -103,9 +113,8 @@ export const MobileOtpVerifier: React.FC<MobileOtpVerifierProps> = ({
           status: parsed.status,
           error: 'Could not send mobile verification OTP.',
         };
-        const retryMatch = parsed.rawBody as { retryAfterSeconds?: number } | null;
-        if (parsed.status === 429 && typeof retryMatch?.retryAfterSeconds === 'number') {
-          setCooldownSec(Math.max(1, retryMatch.retryAfterSeconds));
+        if (parsed.status === 429 && typeof parsed.data?.retryAfterSeconds === 'number') {
+          setCooldownSec(Math.max(1, parsed.data.retryAfterSeconds));
         }
         setInlineError(errInfo.error);
         setInlineErrorDetails(errInfo.details || null);
@@ -129,7 +138,7 @@ export const MobileOtpVerifier: React.FC<MobileOtpVerifierProps> = ({
       setInlineSuccess(okMsg);
       onNotify?.({
         type: 'success',
-        title: 'OTP Dispatched',
+        title: t('OTP Dispatched', 'OTP भेजा गया', 'OTP भेज दियो गयो'),
         message: okMsg,
       });
     } catch (err) {
@@ -163,7 +172,13 @@ export const MobileOtpVerifier: React.FC<MobileOtpVerifierProps> = ({
 
     const cleanOtp = otpCode.replace(/\D/g, '').slice(0, 6);
     if (!/^\d{6}$/.test(cleanOtp)) {
-      setInlineError('Please enter the 6-digit numeric OTP.');
+      setInlineError(
+        t(
+          'Please enter the 6-digit numeric OTP.',
+          'कृपया 6-अंकीय OTP दर्ज करें।',
+          'कृपया 6 अंक रो OTP लिखो।'
+        )
+      );
       return;
     }
 
@@ -217,7 +232,7 @@ export const MobileOtpVerifier: React.FC<MobileOtpVerifierProps> = ({
       });
       onNotify?.({
         type: 'success',
-        title: 'Mobile Number Verified',
+        title: t('Mobile Number Verified', 'मोबाइल नंबर सत्यापित', 'मोबाइल नंबर पक्को हो गयो'),
         message: `${verifiedMobile} verified via live SMS OTP.`,
       });
     } catch (err) {
@@ -238,7 +253,7 @@ export const MobileOtpVerifier: React.FC<MobileOtpVerifierProps> = ({
     <div className="space-y-2.5">
       <div className="flex items-center justify-between gap-2">
         <label className="block text-xs font-semibold text-slate-700">
-          {label} {required && '*'}
+          {resolvedLabel} {required && '*'}
         </label>
         {isVerified ? (
           <span
@@ -246,11 +261,11 @@ export const MobileOtpVerifier: React.FC<MobileOtpVerifierProps> = ({
             className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full"
           >
             <CheckCircle2 className="w-3 h-3" />
-            <span>Mobile Verified</span>
+            <span>{t('Mobile Verified', 'मोबाइल सत्यापित', 'मोबाइल पक्को')}</span>
           </span>
         ) : value.trim().length > 0 ? (
           <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
-            <span>OTP Verification Pending</span>
+            <span>{t('OTP Verification Pending', 'OTP सत्यापन शेष', 'OTP जांच बाकी')}</span>
           </span>
         ) : null}
       </div>
@@ -285,14 +300,22 @@ export const MobileOtpVerifier: React.FC<MobileOtpVerifierProps> = ({
           {sendingOtp ? (
             <>
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              <span>Sending...</span>
+              <span>{t('Sending...', 'भेज रहे हैं...', 'भेज रिया...')}</span>
             </>
           ) : cooldownSec > 0 ? (
-            <span>Resend OTP ({cooldownSec}s)</span>
+            <span>
+              {t(`Resend OTP (${cooldownSec}s)`, `पुनः भेजें (${cooldownSec}s)`, `फेर भेजो (${cooldownSec}s)`)}
+            </span>
           ) : (
             <>
               <MessageSquare className="w-3.5 h-3.5 text-amber-400" />
-              <span>{otpSent ? 'Resend OTP' : isVerified ? 'Re-verify Mobile' : 'Send OTP'}</span>
+              <span>
+                {otpSent
+                  ? t('Resend OTP', 'OTP पुनः भेजें', 'OTP फेर भेजो')
+                  : isVerified
+                  ? t('Re-verify Mobile', 'पुनः सत्यापित करें', 'फेर जांचो')
+                  : t('Send OTP', 'OTP भेजें', 'OTP भेजो')}
+              </span>
             </>
           )}
         </button>
@@ -301,7 +324,12 @@ export const MobileOtpVerifier: React.FC<MobileOtpVerifierProps> = ({
       {otpSent && !isVerified && (
         <div className="p-3 rounded-xl bg-amber-50/80 border border-amber-200 space-y-2">
           <p className="text-[11px] font-semibold text-amber-950">
-            Enter the 6-digit SMS OTP sent to <span className="font-mono">{sentMobileE164}</span>
+            {t(
+              'Enter the 6-digit SMS OTP sent to',
+              'भेजा गया 6-अंकीय SMS OTP दर्ज करें:',
+              'मोबाइल पर आयो 6 अंक रो OTP लिखो:'
+            )}{' '}
+            <span className="font-mono">{sentMobileE164}</span>
           </p>
           <div className="flex flex-col sm:flex-row gap-2">
             <input
@@ -309,7 +337,7 @@ export const MobileOtpVerifier: React.FC<MobileOtpVerifierProps> = ({
               inputMode="numeric"
               value={otpCode}
               onChange={e => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-              placeholder="Enter 6-digit OTP"
+              placeholder={t('Enter 6-digit OTP', '6-अंकीय OTP दर्ज करें', '6 अंक रो OTP लिखो')}
               maxLength={6}
               disabled={verifyingOtp || disabled}
               data-testid="otp-code-input"
@@ -327,7 +355,7 @@ export const MobileOtpVerifier: React.FC<MobileOtpVerifierProps> = ({
               ) : (
                 <ShieldCheck className="w-3.5 h-3.5" />
               )}
-              <span>Confirm OTP</span>
+              <span>{t('Confirm OTP', 'OTP सत्यापित करें', 'OTP पक्को करो')}</span>
             </button>
           </div>
         </div>

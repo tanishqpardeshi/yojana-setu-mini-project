@@ -38,6 +38,13 @@ import {
   validateSamagraLookupId,
   validateSamagraMemberId,
 } from '../utils/samagraValidator';
+import {
+  getCategoryLabel,
+  getGenderLabel,
+  getMaritalLabel,
+  getOccupationLabel,
+  pickText,
+} from '../utils/i18n';
 
 interface SamagraFamilyViewProps {
   currentLanguage: SupportedLanguage;
@@ -133,6 +140,9 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
   onFamiliesChanged,
   onNotify,
 }) => {
+  const t = (en: string, hi: string, malwi: string) =>
+    pickText(currentLanguage, { en, hi, malwi });
+
   const [searchId, setSearchId] = useState(activeFamilyId || '');
   const [registeredFamilies, setRegisteredFamilies] = useState<SamagraFamily[]>([]);
   const [selectedFamily, setSelectedFamily] = useState<SamagraFamily | null>(null);
@@ -553,18 +563,22 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
           <div className="flex items-center space-x-2">
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
             <span className="text-xs font-bold text-emerald-800 uppercase tracking-wider bg-emerald-100 px-2 py-0.5 rounded">
-              Live Samagra Portal Registry
+              {t('Live Samagra Portal Registry', 'लाइव समग्र पोर्टल रजिस्ट्री', 'लाइव समग्र पोर्टल खाता')}
             </span>
           </div>
           <h2 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight mt-1 font-heading">
-            {currentLanguage === 'hi'
-              ? 'समग्र परिवार आईडी (लाइव पंजीयन एवं प्रोफाइल)'
-              : currentLanguage === 'malwi'
-              ? 'समग्र कुटुंब खाता (लाइव खोज व पंजीयन)'
-              : 'Live Samagra Family ID Portal & Household Sync'}
+            {t(
+              'Live Samagra Family ID Portal & Household Sync',
+              'समग्र परिवार आईडी (लाइव पंजीयन एवं प्रोफाइल)',
+              'समग्र कुटुंब खाता (लाइव खोज व पंजीयन)'
+            )}
           </h2>
           <p className="text-sm text-slate-500">
-            Search your official Samagra Family/Member ID or register your verified household below for eligibility matching. Connect Official DigiLocker separately to verify government certificates.
+            {t(
+              'Search your official Samagra Family/Member ID or register your verified household below for eligibility matching. Connect Official DigiLocker separately to verify government certificates.',
+              'अपनी आधिकारिक समग्र परिवार/सदस्य आईडी खोजें या पात्रता जांच के लिए नीचे अपना परिवार पंजीकृत करें। सरकारी प्रमाण पत्रों के लिए डिजिलॉकर अलग से जोड़ें।',
+              'तमारी सरकारी समग्र कुटुंब या सदस्य आईडी खोजो या योजना जांच खातर नीचे अपणो कुटुंब दर्ज करो। सरकारी कागद खातर डिजिलॉकर अलग सूं जोड़ सको छो।'
+            )}
           </p>
         </div>
 
@@ -575,7 +589,7 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
             className="px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 text-xs font-bold inline-flex items-center gap-1.5 transition cursor-pointer"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loadingList ? 'animate-spin' : ''}`} />
-            <span>Refresh</span>
+            <span>{t('Refresh', 'रिफ्रेश', 'ताजा करो')}</span>
           </button>
           <button
             type="button"
@@ -588,7 +602,11 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
             className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-xs transition cursor-pointer"
           >
             <UserPlus className="w-4 h-4" />
-            <span>{showRegisterForm ? 'Close Registration Form' : 'Register New Samagra Family'}</span>
+            <span>
+              {showRegisterForm
+                ? t('Close Registration Form', 'पंजीयन फॉर्म बंद करें', 'फॉर्म बंद करो')
+                : t('Register New Samagra Family', 'नया समग्र परिवार जोड़ें', 'नयो समग्र कुटुंब जोड़ो')}
+            </span>
           </button>
         </div>
       </div>
@@ -681,7 +699,11 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
               type="text"
               value={searchId}
               onChange={e => setSearchId(e.target.value)}
-              placeholder="Enter registered 8-digit Samagra Family ID or 9-digit Member ID..."
+              placeholder={t(
+                'Enter registered 8-digit Samagra Family ID or 9-digit Member ID...',
+                '8-अंकीय समग्र परिवार आईडी या 9-अंकीय सदस्य आईडी दर्ज करें...',
+                '8 अंक रो समग्र कुटुंब नंबर या 9 अंक रो सदस्य नंबर लिखो...'
+              )}
               className="w-full pl-10 pr-3 py-2.5 text-sm rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-amber-500 font-mono text-slate-900"
             />
           </div>
@@ -691,7 +713,7 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
             className="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-60 text-white font-bold text-xs sm:text-sm rounded-xl shadow-xs transition inline-flex items-center justify-center gap-1.5 cursor-pointer"
           >
             {searching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-            <span>Fetch Live Samagra Profile</span>
+            <span>{t('Fetch Live Samagra Profile', 'समग्र प्रोफाइल खोजें', 'समग्र खाता खोजो')}</span>
           </button>
         </form>
 
@@ -699,11 +721,19 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
         <div className="pt-3 border-t border-slate-100">
           <div className="flex items-center justify-between flex-wrap gap-2 text-xs">
             <span className="text-slate-600 font-semibold">
-              Your Linked Samagra Households ({registeredFamilies.length}):
+              {t(
+                `Your Linked Samagra Households (${registeredFamilies.length}):`,
+                `आपके जुड़े समग्र परिवार (${registeredFamilies.length}):`,
+                `तमारा जुड़योड़ा समग्र कुटुंब (${registeredFamilies.length}):`
+              )}
             </span>
             {registeredFamilies.length === 0 && !loadingList && (
               <span className="text-amber-700 font-medium">
-                Enter your 8-digit Samagra Family ID above or click "Register New Samagra Family".
+                {t(
+                  'Enter your 8-digit Samagra Family ID above or click "Register New Samagra Family".',
+                  'ऊपर अपनी 8-अंकीय समग्र परिवार आईडी दर्ज करें या "नया समग्र परिवार जोड़ें" पर क्लिक करें।',
+                  'ऊपर 8 अंक रो समग्र कुटुंब नंबर लिखो या "नयो समग्र कुटुंब जोड़ो" दबावो।'
+                )}
               </span>
             )}
           </div>
@@ -744,10 +774,14 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
           <div className="flex flex-wrap items-center justify-between gap-2 pb-4 border-b border-slate-100">
             <div>
               <span className="text-[11px] font-bold uppercase tracking-wider text-amber-800 bg-amber-100 px-2 py-0.5 rounded">
-                Samagra Family Registration
+                {t('Samagra Family Registration', 'समग्र परिवार पंजीयन', 'समग्र कुटुंब पंजीयन')}
               </span>
               <h3 className="text-lg font-black text-slate-900 mt-1">
-                Enter Official Household Details from Samagra Portal
+                {t(
+                  'Enter Official Household Details from Samagra Portal',
+                  'समग्र पोर्टल के अनुसार परिवार का विवरण दर्ज करें',
+                  'समग्र पोर्टल रा हिसाब सूं कुटुंब री जानकारी भरो'
+                )}
               </h3>
             </div>
             <a
@@ -756,7 +790,7 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
               rel="noopener noreferrer"
               className="text-xs font-bold text-amber-700 hover:text-amber-900 inline-flex items-center gap-1 underline"
             >
-              <span>Check ID on samagra.gov.in</span>
+              <span>{t('Check ID on samagra.gov.in', 'samagra.gov.in पर आईडी जांचें', 'samagra.gov.in पर नंबर देखो')}</span>
               <ExternalLink className="w-3.5 h-3.5" />
             </a>
           </div>
@@ -765,36 +799,40 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
-                8-Digit Samagra Family ID *
+                {t('8-Digit Samagra Family ID *', '8-अंकीय समग्र परिवार आईडी *', '8 अंक रो समग्र कुटुंब नंबर *')}
               </label>
               <input
                 type="text"
                 value={regFamilyId}
                 onChange={e => setRegFamilyId(e.target.value.replace(/\D/g, '').slice(0, 8))}
                 required
-                placeholder="Enter 8-digit Family ID"
+                placeholder={t('Enter 8-digit Family ID', '8-अंकीय परिवार आईडी लिखें', '8 अंक रो कुटुंब नंबर लिखो')}
                 className="w-full px-3 py-2 text-xs font-mono font-bold border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-amber-500"
               />
             </div>
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Jurisdiction Type *
+                {t('Jurisdiction Type *', 'क्षेत्र प्रकार *', 'शहर या गाँव *')}
               </label>
               <select
                 value={regAreaType}
                 onChange={e => setRegAreaType(e.target.value as AreaType)}
                 className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white"
               >
-                <option value="urban">Urban (Indore IMC Ward 1–85)</option>
-                <option value="rural">Rural (Indore Janpad Block)</option>
+                <option value="urban">
+                  {t('Urban (Indore IMC Ward 1–85)', 'शहरी (इंदौर नगर निगम वार्ड 1–85)', 'शहर (इंदौर नगर निगम वार्ड 1–85)')}
+                </option>
+                <option value="rural">
+                  {t('Rural (Indore Janpad Block)', 'ग्रामीण (इंदौर जनपद ब्लॉक)', 'गाँव (इंदौर जनपद ब्लॉक)')}
+                </option>
               </select>
             </div>
 
             {regAreaType === 'urban' ? (
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  IMC Ward *
+                  {t('IMC Ward *', 'नगर निगम वार्ड *', 'नगर निगम वार्ड *')}
                 </label>
                 <select
                   value={regWardNumber}
@@ -803,7 +841,7 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
                 >
                   {IMC_WARDS.map(w => (
                     <option key={w.number} value={w.number}>
-                      Ward {w.number}: {w.name}
+                      {t(`Ward ${w.number}: ${w.name}`, `वार्ड ${w.number}: ${w.name}`, `वार्ड ${w.number}: ${w.name}`)}
                     </option>
                   ))}
                 </select>
@@ -811,7 +849,7 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
             ) : (
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Janpad Block *
+                  {t('Janpad Block *', 'जनपद ब्लॉक *', 'जनपद ब्लॉक *')}
                 </label>
                 <select
                   value={regBlockName}
@@ -820,7 +858,8 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
                 >
                   {JANPAD_BLOCKS.map(b => (
                     <option key={b.name} value={b.name}>
-                      {b.name} Janpad ({b.panchayatCount} Panchayats)
+                      {t(`${b.name} Janpad`, `${b.name} जनपद`, `${b.name} जनपद`)} ({b.panchayatCount}{' '}
+                      {t('Panchayats', 'पंचायतें', 'पंचायत')})
                     </option>
                   ))}
                 </select>
@@ -829,29 +868,33 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Ration Card Category *
+                {t('Ration Card Category *', 'राशन कार्ड श्रेणी *', 'राशन कार्ड री श्रेणी *')}
               </label>
               <select
                 value={regRationCard}
                 onChange={e => setRegRationCard(e.target.value as 'APL' | 'BPL' | 'Antyodaya')}
                 className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white"
               >
-                <option value="APL">APL (Above Poverty Line)</option>
-                <option value="BPL">BPL (Below Poverty Line)</option>
-                <option value="Antyodaya">Antyodaya (AAY)</option>
+                <option value="APL">{t('APL (Above Poverty Line)', 'एपीएल (सामान्य राशन कार्ड)', 'एपीएल (सफेद राशन कार्ड)')}</option>
+                <option value="BPL">{t('BPL (Below Poverty Line)', 'बीपीएल (गरीबी रेखा से नीचे)', 'बीपीएल (पीलो राशन कार्ड)')}</option>
+                <option value="Antyodaya">{t('Antyodaya (AAY)', 'अंत्योदय (AAY)', 'अंत्योदय (AAY)')}</option>
               </select>
             </div>
           </div>
 
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1">
-              Residential Address in Indore District
+              {t('Residential Address in Indore District', 'इंदौर जिले का आवासीय पता', 'इंदौर जिला रो घर रो पतो')}
             </label>
             <input
               type="text"
               value={regAddress}
               onChange={e => setRegAddress(e.target.value)}
-              placeholder="House / Street / Colony / Village name in Indore District"
+              placeholder={t(
+                'House / Street / Colony / Village name in Indore District',
+                'मकान नंबर / गली / कॉलोनी / गांव का नाम लिखें',
+                'मकान / मोहल्लो / कॉलोनी / गाँव रो नाम लिखो'
+              )}
               className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-amber-500"
             />
           </div>
@@ -860,7 +903,11 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <h4 className="text-xs font-bold uppercase tracking-wider text-slate-600">
-                Household Members ({draftMembers.length})
+                {t(
+                  `Household Members (${draftMembers.length})`,
+                  `परिवार के सदस्य (${draftMembers.length})`,
+                  `कुटुंब रा सदस्य (${draftMembers.length})`
+                )}
               </h4>
               <button
                 type="button"
@@ -868,7 +915,7 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
                 className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold transition cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
-                <span>Add Family Member</span>
+                <span>{t('Add Family Member', 'सदस्य जोड़ें', 'नयो सदस्य जोड़ो')}</span>
               </button>
             </div>
 
@@ -880,7 +927,9 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-slate-800">
-                      {idx === 0 ? 'Member 1 (Head of Household)' : `Member ${idx + 1}`}
+                      {idx === 0
+                        ? t('Member 1 (Head of Household)', 'सदस्य 1 (परिवार का मुखिया)', 'सदस्य 1 (घर रो मुखिया)')
+                        : t(`Member ${idx + 1}`, `सदस्य ${idx + 1}`, `सदस्य ${idx + 1}`)}
                     </span>
                     {idx > 0 && (
                       <button
@@ -889,7 +938,7 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
                         className="text-xs text-rose-600 hover:text-rose-800 font-semibold inline-flex items-center gap-1 cursor-pointer"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
-                        <span>Remove</span>
+                        <span>{t('Remove', 'हटाएं', 'हटावो')}</span>
                       </button>
                     )}
                   </div>
@@ -897,7 +946,7 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                     <div>
                       <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                        Full Name *
+                        {t('Full Name *', 'पूरा नाम *', 'पूरो नाम *')}
                       </label>
                       <input
                         type="text"
@@ -908,19 +957,19 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
                             prev.map((m, i) => (i === idx ? { ...m, name: e.target.value } : m))
                           )
                         }
-                        placeholder="Citizen full name"
+                        placeholder={t('Citizen full name', 'नागरिक का पूरा नाम', 'सदस्य रो पूरो नाम')}
                         className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg"
                       />
                     </div>
 
                     <div>
                       <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                        9-Digit Member ID *
+                        {t('9-Digit Member ID *', '9-अंकीय सदस्य आईडी *', '9 अंक रो सदस्य नंबर *')}
                       </label>
                       <input
                         type="text"
                         required
-                        placeholder="Enter 9-digit Member ID"
+                        placeholder={t('Enter 9-digit Member ID', '9-अंकीय सदस्य आईडी', '9 अंक रो सदस्य नंबर')}
                         value={member.memberId}
                         onChange={e =>
                           setDraftMembers(prev =>
@@ -937,7 +986,7 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
 
                     <div>
                       <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                        Relation
+                        {t('Relation', 'संबंध', 'नातो / संबंध')}
                       </label>
                       <input
                         type="text"
@@ -954,7 +1003,7 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
                     <div className="grid grid-cols-2 gap-2">
                       <div>
                         <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                          Age
+                          {t('Age', 'आयु', 'उमर')}
                         </label>
                         <input
                           type="number"
@@ -973,7 +1022,7 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
                       </div>
                       <div>
                         <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                          Gender
+                          {t('Gender', 'लिंग', 'लिंग')}
                         </label>
                         <select
                           value={member.gender}
@@ -986,16 +1035,16 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
                           }
                           className="w-full px-2 py-1.5 text-xs bg-white border border-slate-300 rounded-lg"
                         >
-                          <option value="female">Female</option>
-                          <option value="male">Male</option>
-                          <option value="transgender">Other</option>
+                          <option value="female">{getGenderLabel('female', currentLanguage)}</option>
+                          <option value="male">{getGenderLabel('male', currentLanguage)}</option>
+                          <option value="transgender">{getGenderLabel('transgender', currentLanguage)}</option>
                         </select>
                       </div>
                     </div>
 
                     <div>
                       <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                        Occupation
+                        {t('Occupation', 'व्यवसाय', 'काम-धंधो')}
                       </label>
                       <select
                         value={member.occupation}
@@ -1010,7 +1059,7 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
                       >
                         {OCCUPATIONS.map(occ => (
                           <option key={occ} value={occ}>
-                            {occ}
+                            {getOccupationLabel(occ, currentLanguage)}
                           </option>
                         ))}
                       </select>
@@ -1018,7 +1067,7 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
 
                     <div>
                       <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                        Category / Marital
+                        {t('Category / Marital', 'वर्ग / वैवाहिक', 'वर्ग / ब्याह स्थिति')}
                       </label>
                       <div className="grid grid-cols-2 gap-1.5">
                         <select
@@ -1034,7 +1083,7 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
                         >
                           {CATEGORIES.map(c => (
                             <option key={c} value={c}>
-                              {c}
+                              {getCategoryLabel(c, currentLanguage)}
                             </option>
                           ))}
                         </select>
@@ -1053,7 +1102,7 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
                         >
                           {MARITAL_STATUSES.map(ms => (
                             <option key={ms} value={ms}>
-                              {ms}
+                              {getMaritalLabel(ms, currentLanguage)}
                             </option>
                           ))}
                         </select>
@@ -1062,7 +1111,7 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
 
                     <div>
                       <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                        Annual Income (₹)
+                        {t('Annual Income (₹)', 'वार्षिक आय (₹)', 'सालाना कमाई (₹)')}
                       </label>
                       <input
                         type="number"
@@ -1082,7 +1131,7 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
 
                     <div>
                       <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                        Land Holding (Ha)
+                        {t('Land Holding (Ha)', 'कृषि भूमि (हेक्टेयर)', 'खेती री जमीन (हेक्टेयर)')}
                       </label>
                       <input
                         type="number"
@@ -1117,7 +1166,7 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
                         }
                         className="rounded text-emerald-600"
                       />
-                      <span>Aadhaar eKYC Verified</span>
+                      <span>{t('Aadhaar eKYC Verified', 'आधार eKYC सत्यापित', 'आधार eKYC पक्को छे')}</span>
                     </label>
                     <label className="inline-flex items-center gap-1.5 cursor-pointer">
                       <input
@@ -1132,7 +1181,7 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
                         }
                         className="rounded text-emerald-600"
                       />
-                      <span>NPCI Bank DBT Enabled</span>
+                      <span>{t('NPCI Bank DBT Enabled', 'बैंक DBT सक्रिय', 'बैंक खाता मां DBT चालू')}</span>
                     </label>
                     <label className="inline-flex items-center gap-1.5 cursor-pointer">
                       <input
@@ -1147,7 +1196,7 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
                         }
                         className="rounded text-amber-600"
                       />
-                      <span>Divyang (40%+)</span>
+                      <span>{t('Divyang (40%+)', 'दिव्यांग (40%+)', 'दिव्यांग (40%+)')}</span>
                     </label>
                   </div>
                 </div>
@@ -1161,7 +1210,7 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
               onClick={() => setShowRegisterForm(false)}
               className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900 cursor-pointer"
             >
-              Cancel
+              {t('Cancel', 'रद्द करें', 'रद्द करो')}
             </button>
             <button
               type="submit"
@@ -1173,7 +1222,7 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
               ) : (
                 <ShieldCheck className="w-4 h-4" />
               )}
-              <span>Save Samagra Household</span>
+              <span>{t('Save Samagra Household', 'समग्र परिवार सहेजें', 'समग्र कुटुंब सहेजो')}</span>
             </button>
           </div>
         </form>
@@ -1187,10 +1236,18 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
           </div>
           <div className="max-w-lg mx-auto space-y-1.5">
             <h3 className="text-lg font-black text-slate-900">
-              No Samagra Household Linked Yet
+              {t(
+                'No Samagra Household Linked Yet',
+                'अभी कोई समग्र परिवार लिंक नहीं है',
+                'अभी कोई समग्र कुटुंब जुड़यो नी छे'
+              )}
             </h3>
             <p className="text-xs text-slate-500 leading-relaxed">
-              Demo profiles have been completely removed. Register a live Samagra Family ID (8-digit) and Member ID (9-digit) to run real-time eligibility matching, persistent DigiLocker Wallet verification, and end-to-end application tracking.
+              {t(
+                'Register a live Samagra Family ID (8-digit) and Member ID (9-digit) to run real-time eligibility matching, persistent DigiLocker Wallet verification, and end-to-end application tracking.',
+                'लाइव पात्रता जांच, डिजिलॉकर दस्तावेज़ सत्यापन और आवेदन ट्रैकिंग के लिए अपनी 8-अंकीय समग्र परिवार आईडी और 9-अंकीय सदस्य आईडी दर्ज करें।',
+                'सही योजना जांच, डिजिलॉकर कागद सत्यापन अने अर्जी ट्रैकिंग खातर अपणो 8 अंक रो समग्र कुटुंब नंबर अने 9 अंक रो सदस्य नंबर दर्ज करो।'
+              )}
             </p>
           </div>
           <button
@@ -1199,7 +1256,13 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
             className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold inline-flex items-center gap-2 shadow-xs cursor-pointer"
           >
             <UserPlus className="w-4 h-4" />
-            <span>Register Your Live Samagra Household</span>
+            <span>
+              {t(
+                'Register Your Live Samagra Household',
+                'अपना समग्र परिवार पंजीकृत करें',
+                'अपणो समग्र कुटुंब दर्ज करो'
+              )}
+            </span>
           </button>
         </div>
       )}
@@ -1212,10 +1275,18 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
             <div>
               <div className="flex items-center space-x-2 text-amber-400 text-xs font-bold uppercase">
                 <ShieldCheck className="w-4 h-4" />
-                <span>Live Samagra Family Record (SPR Synced)</span>
+                <span>
+                  {t(
+                    'Live Samagra Family Record (SPR Synced)',
+                    'लाइव समग्र परिवार रिकॉर्ड (SPR सिंक)',
+                    'लाइव समग्र कुटुंब रिकॉर्ड'
+                  )}
+                </span>
               </div>
               <h3 className="text-xl sm:text-2xl font-black mt-1 font-heading">
-                Family ID: <span className="font-mono text-amber-400">{selectedFamily.familyId}</span> • Head: {selectedFamily.headName}
+                {t('Family ID:', 'परिवार आईडी:', 'कुटुंब नंबर:')}{' '}
+                <span className="font-mono text-amber-400">{selectedFamily.familyId}</span> •{' '}
+                {t('Head:', 'मुखिया:', 'मुखिया:')} {selectedFamily.headName}
               </h3>
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-300 mt-1.5">
                 <span className="flex items-center space-x-1">
@@ -1225,7 +1296,8 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
                 <span className="flex items-center space-x-1">
                   <CreditCard className="w-3.5 h-3.5 text-emerald-400" />
                   <span>
-                    Ration Card: <strong className="text-white">{selectedFamily.rationCardType}</strong>
+                    {t('Ration Card:', 'राशन कार्ड:', 'राशन कार्ड:')}{' '}
+                    <strong className="text-white">{selectedFamily.rationCardType}</strong>
                   </span>
                 </span>
                 <span className="text-slate-400">{selectedFamily.address}</span>
@@ -1233,7 +1305,9 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
             </div>
 
             <div className="bg-slate-800 px-4 py-2.5 rounded-2xl border border-slate-700 text-center shrink-0">
-              <div className="text-xs text-slate-400">Members Mapped</div>
+              <div className="text-xs text-slate-400">
+                {t('Members Mapped', 'कुल सदस्य', 'कुल सदस्य')}
+              </div>
               <div className="text-2xl font-black text-amber-400 font-mono">
                 {selectedFamily.members.length}
               </div>
@@ -1244,7 +1318,13 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
           <div className="p-6">
             <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-4 flex items-center space-x-1.5">
               <Users className="w-4 h-4 text-slate-400" />
-              <span>Household Members — Toggle Live eKYC/DBT or Load into Citizen Profile:</span>
+              <span>
+                {t(
+                  'Household Members — Toggle Live eKYC/DBT or Load into Citizen Profile:',
+                  'परिवार के सदस्य — eKYC/DBT बदलें या नागरिक प्रोफाइल में लोड करें:',
+                  'कुटुंब रा सदस्य — eKYC/DBT बदलो या योजना जांच खातर सदस्य चुनो:'
+                )}
+              </span>
             </h4>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -1266,7 +1346,7 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
                       {/* Top ID & Relation */}
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-900">
-                          {member.relation}
+                          {currentLanguage === 'en' ? member.relation : member.relationHindi || member.relation}
                         </span>
                         <span className="text-[11px] font-mono text-slate-500 font-semibold">
                           ID: {member.memberId}
@@ -1275,21 +1355,25 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
 
                       {/* Name & Age */}
                       <div className="flex items-center justify-between gap-2">
-                        <h5 className="text-base font-bold text-slate-900">{member.name}</h5>
+                        <h5 className="text-base font-bold text-slate-900">
+                          {currentLanguage === 'en' ? member.name : member.nameHindi || member.name}
+                        </h5>
                         {isActiveMember && (
                           <span className="text-[10px] font-bold bg-emerald-600 text-white px-2 py-0.5 rounded-full">
-                            Active
+                            {t('Active', 'सक्रिय', 'चालू')}
                           </span>
                         )}
                       </div>
                       <p className="text-xs text-slate-500 mt-0.5">
-                        {member.age} yrs • {member.gender.toUpperCase()} • {member.category || 'GEN'} • {member.occupation}
+                        {member.age} {t('yrs', 'वर्ष', 'बरस')} • {getGenderLabel(member.gender, currentLanguage)} •{' '}
+                        {getCategoryLabel(member.category || 'GEN', currentLanguage)} •{' '}
+                        {getOccupationLabel(member.occupation, currentLanguage)}
                       </p>
 
                       {/* Live Interactive eKYC & DBT Verification Controls */}
                       <div className="mt-4 pt-3 border-t border-slate-200 space-y-2 text-xs">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-slate-600">Aadhaar eKYC:</span>
+                          <span className="text-slate-600">{t('Aadhaar eKYC:', 'आधार eKYC:', 'आधार eKYC:')}</span>
                           <button
                             type="button"
                             disabled={isUpdating}
@@ -1305,19 +1389,22 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
                                 ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
                                 : 'bg-amber-100 text-amber-800 hover:bg-amber-200'
                             }`}
-                            title="Toggle live Aadhaar eKYC status"
                           >
                             {member.ekycStatus ? (
                               <CheckCircle2 className="w-3.5 h-3.5" />
                             ) : (
                               <AlertCircle className="w-3.5 h-3.5" />
                             )}
-                            <span>{member.ekycStatus ? 'Verified' : 'Verify eKYC'}</span>
+                            <span>
+                              {member.ekycStatus
+                                ? t('Verified', 'सत्यापित', 'पक्को')
+                                : t('Verify eKYC', 'eKYC करें', 'eKYC करो')}
+                            </span>
                           </button>
                         </div>
 
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-slate-600">NPCI Bank DBT:</span>
+                          <span className="text-slate-600">{t('NPCI Bank DBT:', 'बैंक DBT:', 'बैंक DBT:')}</span>
                           <button
                             type="button"
                             disabled={isUpdating}
@@ -1333,19 +1420,24 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
                                 ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
                                 : 'bg-rose-100 text-rose-800 hover:bg-rose-200'
                             }`}
-                            title="Toggle live NPCI Bank DBT seeding status"
                           >
                             {member.dbtActive ? (
                               <CheckCircle2 className="w-3.5 h-3.5" />
                             ) : (
                               <AlertCircle className="w-3.5 h-3.5" />
                             )}
-                            <span>{member.dbtActive ? 'DBT Active' : 'Activate DBT'}</span>
+                            <span>
+                              {member.dbtActive
+                                ? t('DBT Active', 'DBT सक्रिय', 'DBT चालू')
+                                : t('Activate DBT', 'DBT चालू करें', 'DBT चालू करो')}
+                            </span>
                           </button>
                         </div>
 
                         <div className="flex items-center justify-between">
-                          <span className="text-slate-600">Annual Income:</span>
+                          <span className="text-slate-600">
+                            {t('Annual Income:', 'वार्षिक आय:', 'सालाना कमाई:')}
+                          </span>
                           <span className="font-mono font-bold text-slate-800">
                             ₹{(member.annualIncome ?? 0).toLocaleString('en-IN')}
                           </span>
@@ -1354,7 +1446,9 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
 
                       {/* Scheme Count Preview */}
                       <div className="mt-3 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-xs flex justify-between items-center">
-                        <span className="font-semibold text-amber-900">Matched Schemes:</span>
+                        <span className="font-semibold text-amber-900">
+                          {t('Matched Schemes:', 'पात्र योजनाएं:', 'मिलती योजना:')}
+                        </span>
                         <span className="font-black text-amber-700 font-mono text-sm">
                           {matchCount}
                         </span>
@@ -1368,7 +1462,13 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
                       className="mt-4 w-full py-2 px-3 rounded-xl text-xs font-bold bg-slate-900 hover:bg-amber-600 text-white transition flex items-center justify-center space-x-1.5 shadow-xs cursor-pointer"
                     >
                       <UserCheck className="w-3.5 h-3.5" />
-                      <span>Load Citizen & Sync DigiLocker</span>
+                      <span>
+                        {t(
+                          'Load Citizen & Sync DigiLocker',
+                          'प्रोफाइल लोड करें व डिजिलॉकर जोड़ें',
+                          'ई सदस्य ने चुनो व योजना देखो'
+                        )}
+                      </span>
                       <ArrowRight className="w-3.5 h-3.5" />
                     </button>
                   </div>

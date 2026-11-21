@@ -25,6 +25,7 @@ export function evaluateSchemeEligibility(
         passed: true,
         reason: 'Resident of Madhya Pradesh verified',
         reasonHindi: 'मध्य प्रदेश का मूल निवासी सत्यापित',
+        reasonMalwi: 'म.प्र. रो मूल निवासी पक्को छे',
       });
       passingReasons.push('Valid MP Domicile confirmed');
     } else {
@@ -33,6 +34,7 @@ export function evaluateSchemeEligibility(
         passed: false,
         reason: 'Must be a bona fide resident of Madhya Pradesh',
         reasonHindi: 'मध्य प्रदेश का मूल निवासी होना अनिवार्य है',
+        reasonMalwi: 'ई योजना खातर म.प्र. रो निवासी होणो जरूरी छे',
       });
       failingReasons.push('Applicant is not an MP resident');
       hardDisqualification = true;
@@ -47,6 +49,7 @@ export function evaluateSchemeEligibility(
         passed: true,
         reason: 'Indore district resident verified',
         reasonHindi: 'इंदौर जिले का निवासी सत्यापित',
+        reasonMalwi: 'इंदौर जिला रो निवासी पक्को छे',
       });
       passingReasons.push('Indore jurisdiction verified');
     } else {
@@ -55,6 +58,7 @@ export function evaluateSchemeEligibility(
         passed: false,
         reason: 'Must be an Indore district resident for this scheme',
         reasonHindi: 'इस योजना हेतु इंदौर जिले का निवासी होना अनिवार्य है',
+        reasonMalwi: 'ई योजना खातर इंदौर जिला रो निवासी होणो जरूरी छे',
       });
       failingReasons.push('Requires residency within Indore District');
       hardDisqualification = true;
@@ -69,6 +73,7 @@ export function evaluateSchemeEligibility(
         passed: true,
         reason: `Applicant gender (${profile.gender}) matches scheme criteria (${rules.gender})`,
         reasonHindi: `लिंग पात्रता पूर्ण (${rules.gender === 'female' ? 'महिला' : 'पुरुष'})`,
+        reasonMalwi: `${rules.gender === 'female' ? 'बाईजी (महिला)' : 'भाईजी (पुरुष)'} पात्रता पूरी छे`,
       });
       passingReasons.push(`Eligible for ${rules.gender === 'female' ? 'women' : 'men'}-focused entitlement`);
     } else {
@@ -77,6 +82,7 @@ export function evaluateSchemeEligibility(
         passed: false,
         reason: `Scheme is exclusively for ${rules.gender} beneficiaries`,
         reasonHindi: `यह योजना केवल ${rules.gender === 'female' ? 'महिला' : 'पुरुष'} लाभार्थियों हेतु है`,
+        reasonMalwi: `या योजना खाली ${rules.gender === 'female' ? 'बाईजी (महिला)' : 'भाईजी (पुरुष)'} खातर छे`,
       });
       failingReasons.push(`Gender requirement mismatch (Scheme is for ${rules.gender})`);
       hardDisqualification = true;
@@ -91,6 +97,7 @@ export function evaluateSchemeEligibility(
         passed: true,
         reason: `Age ${profile.age} meets minimum age limit of ${rules.ageMin} years`,
         reasonHindi: `आयु ${profile.age} वर्ष न्यूनतम सीमा ${rules.ageMin} वर्ष के अनुरूप है`,
+        reasonMalwi: `थारी उमर ${profile.age} साल कम सूं कम ${rules.ageMin} साल री शर्त पूरी करे छे`,
       });
       passingReasons.push(`Age ${profile.age} is above minimum ${rules.ageMin}`);
     } else {
@@ -99,6 +106,7 @@ export function evaluateSchemeEligibility(
         passed: false,
         reason: `Age ${profile.age} is below minimum required age of ${rules.ageMin} years`,
         reasonHindi: `आयु ${profile.age} वर्ष न्यूनतम सीमा ${rules.ageMin} वर्ष से कम है`,
+        reasonMalwi: `उमर ${profile.age} साल छे, कम सूं कम ${rules.ageMin} साल होणी चाहिजे`,
       });
       failingReasons.push(`Age must be at least ${rules.ageMin} years (current: ${profile.age})`);
       hardDisqualification = true;
@@ -112,6 +120,7 @@ export function evaluateSchemeEligibility(
         passed: true,
         reason: `Age ${profile.age} is within maximum limit of ${rules.ageMax} years`,
         reasonHindi: `आयु ${profile.age} वर्ष अधिकतम सीमा ${rules.ageMax} वर्ष के भीतर है`,
+        reasonMalwi: `थारी उमर ${profile.age} साल ज्यादा सूं ज्यादा ${rules.ageMax} साल री सीमा मां छे`,
       });
       passingReasons.push(`Age ${profile.age} is below maximum ${rules.ageMax}`);
     } else {
@@ -120,6 +129,7 @@ export function evaluateSchemeEligibility(
         passed: false,
         reason: `Age ${profile.age} exceeds maximum allowed limit of ${rules.ageMax} years`,
         reasonHindi: `आयु ${profile.age} वर्ष अधिकतम सीमा ${rules.ageMax} वर्ष से अधिक है`,
+        reasonMalwi: `उमर ${profile.age} साल छे, ${rules.ageMax} साल सूं ज्यादा हो गई छे`,
       });
       failingReasons.push(`Age exceeds maximum limit of ${rules.ageMax} years (current: ${profile.age})`);
       hardDisqualification = true;
@@ -134,6 +144,7 @@ export function evaluateSchemeEligibility(
         passed: true,
         reason: `Matches required ${rules.requiredAreaType === 'urban' ? 'Urban (IMC)' : 'Rural (Janpad)'} area`,
         reasonHindi: `${rules.requiredAreaType === 'urban' ? 'शहरी (नगर निगम)' : 'ग्रामीण (जनपद)'} क्षेत्र के अनुरूप`,
+        reasonMalwi: `${rules.requiredAreaType === 'urban' ? 'शहर (इंदौर नगर निगम)' : 'गाँव (जनपद पंचायत)'} क्षेत्र बिल्कुल सही छे`,
       });
       passingReasons.push(`Location matches ${rules.requiredAreaType} area requirement`);
     } else {
@@ -142,6 +153,7 @@ export function evaluateSchemeEligibility(
         passed: false,
         reason: `Scheme is exclusively for ${rules.requiredAreaType === 'urban' ? 'IMC Urban Ward' : 'Rural Janpad'} residents`,
         reasonHindi: `यह योजना केवल ${rules.requiredAreaType === 'urban' ? 'शहरी नगर निगम' : 'ग्रामीण जनपद'} हेतु है`,
+        reasonMalwi: `या योजना खाली ${rules.requiredAreaType === 'urban' ? 'शहर नगर निगम' : 'गाँव जनपद'} वाला खातर छे`,
       });
       failingReasons.push(`Requires ${rules.requiredAreaType} jurisdiction (applicant is in ${profile.areaType})`);
       hardDisqualification = true;
@@ -156,6 +168,7 @@ export function evaluateSchemeEligibility(
         passed: true,
         reason: `Block ${profile.blockName} is in approved blocks (${rules.requiredBlocks.join(', ')})`,
         reasonHindi: `जनपद ब्लॉक ${profile.blockName} मान्य ब्लॉक सूची में है`,
+        reasonMalwi: `जनपद ब्लॉक ${profile.blockName} ई योजना री सूची मां शामिल छे`,
       });
       passingReasons.push(`Janpad block ${profile.blockName} approved`);
     } else {
@@ -164,6 +177,7 @@ export function evaluateSchemeEligibility(
         passed: false,
         reason: `Restricted to Janpad blocks: ${rules.requiredBlocks.join(', ')}`,
         reasonHindi: `यह योजना केवल इन जनपदों हेतु है: ${rules.requiredBlocks.join(', ')}`,
+        reasonMalwi: `या योजना खाली ई जनपद खातर छे: ${rules.requiredBlocks.join(', ')}`,
       });
       failingReasons.push(`Eligible only in blocks: ${rules.requiredBlocks.join(', ')}`);
       hardDisqualification = true;
@@ -178,6 +192,7 @@ export function evaluateSchemeEligibility(
         passed: true,
         reason: `Category ${profile.category} matches eligible criteria (${rules.allowedCategories.join(', ')})`,
         reasonHindi: `सामाजिक वर्ग ${profile.category} पात्र श्रेणी में सम्मिलित`,
+        reasonMalwi: `जाति वर्ग ${profile.category} पात्र सूची मां शामिल छे`,
       });
       passingReasons.push(`Category ${profile.category} eligible`);
     } else {
@@ -186,6 +201,7 @@ export function evaluateSchemeEligibility(
         passed: false,
         reason: `Reserved for categories: ${rules.allowedCategories.join(', ')}`,
         reasonHindi: `केवल इन वर्गों हेतु मान्य: ${rules.allowedCategories.join(', ')}`,
+        reasonMalwi: `खाली ई वर्ग खातर मान्य छे: ${rules.allowedCategories.join(', ')}`,
       });
       failingReasons.push(`Category ${profile.category} not in target list (${rules.allowedCategories.join(', ')})`);
       hardDisqualification = true;
@@ -200,6 +216,7 @@ export function evaluateSchemeEligibility(
         passed: true,
         reason: `Occupation (${profile.occupation}) aligns with target beneficiaries`,
         reasonHindi: `व्यवसाय (${profile.occupation}) योजना के अनुरूप है`,
+        reasonMalwi: `कामकाज (${profile.occupation}) योजना री शर्त सूं मिले छे`,
       });
       passingReasons.push(`Occupation (${profile.occupation}) is eligible`);
     } else {
@@ -208,9 +225,9 @@ export function evaluateSchemeEligibility(
         passed: false,
         reason: `Applicable to: ${rules.allowedOccupations.join(', ')}`,
         reasonHindi: `केवल इन व्यवसायों हेतु: ${rules.allowedOccupations.join(', ')}`,
+        reasonMalwi: `खाली ई कामकाज वाला खातर छे: ${rules.allowedOccupations.join(', ')}`,
       });
       failingReasons.push(`Occupation (${profile.occupation}) not targeted by this scheme`);
-      // Soft or hard depending on flexibility
       hardDisqualification = true;
     }
   }
@@ -223,6 +240,7 @@ export function evaluateSchemeEligibility(
         passed: true,
         reason: `Annual income (₹${profile.annualIncome.toLocaleString('en-IN')}) is within ceiling of ₹${rules.maxIncomeAnnual.toLocaleString('en-IN')}`,
         reasonHindi: `वार्षिक आय (₹${profile.annualIncome.toLocaleString('en-IN')}) सीमा ₹${rules.maxIncomeAnnual.toLocaleString('en-IN')} के भीतर है`,
+        reasonMalwi: `साल री कमाई (₹${profile.annualIncome.toLocaleString('en-IN')}) तय सीमा ₹${rules.maxIncomeAnnual.toLocaleString('en-IN')} रा भीतर छे`,
       });
       passingReasons.push(`Income under ₹${rules.maxIncomeAnnual.toLocaleString('en-IN')} ceiling`);
     } else {
@@ -231,6 +249,7 @@ export function evaluateSchemeEligibility(
         passed: false,
         reason: `Annual income (₹${profile.annualIncome.toLocaleString('en-IN')}) exceeds limit of ₹${rules.maxIncomeAnnual.toLocaleString('en-IN')}`,
         reasonHindi: `वार्षिक आय (₹${profile.annualIncome.toLocaleString('en-IN')}) सीमा ₹${rules.maxIncomeAnnual.toLocaleString('en-IN')} से अधिक है`,
+        reasonMalwi: `साल री कमाई (₹${profile.annualIncome.toLocaleString('en-IN')}) तय सीमा ₹${rules.maxIncomeAnnual.toLocaleString('en-IN')} सूं ज्यादा छे`,
       });
       failingReasons.push(`Annual income ₹${profile.annualIncome.toLocaleString('en-IN')} exceeds threshold of ₹${rules.maxIncomeAnnual.toLocaleString('en-IN')}`);
       hardDisqualification = true;
@@ -245,6 +264,7 @@ export function evaluateSchemeEligibility(
         passed: true,
         reason: `Landholding (${profile.landHoldingHectares} Ha) meets minimum ${rules.landHoldingMinHectares} Ha requirement`,
         reasonHindi: `कृषि भूमि (${profile.landHoldingHectares} हेक्टेयर) न्यूनतम सीमा के अनुरूप`,
+        reasonMalwi: `खेती री जमीन (${profile.landHoldingHectares} हेक्टेयर) योजना री शर्त पूरी करे छे`,
       });
       passingReasons.push(`Agricultural landholding confirmed (${profile.landHoldingHectares} Hectares)`);
     } else {
@@ -253,6 +273,7 @@ export function evaluateSchemeEligibility(
         passed: false,
         reason: `Minimum ${rules.landHoldingMinHectares} Hectare agricultural land required`,
         reasonHindi: `न्यूनतम ${rules.landHoldingMinHectares} हेक्टेयर कृषि भूमि होना आवश्यक है`,
+        reasonMalwi: `कम सूं कम ${rules.landHoldingMinHectares} हेक्टेयर खेती री जमीन होणी जरूरी छे`,
       });
       failingReasons.push(`Requires at least ${rules.landHoldingMinHectares} Ha land (current: ${profile.landHoldingHectares} Ha)`);
       hardDisqualification = true;
@@ -267,6 +288,7 @@ export function evaluateSchemeEligibility(
         passed: true,
         reason: `Certified Divyangjan (${profile.disabilityPercent || 40}%+ disability verified)`,
         reasonHindi: `दिव्यांग प्रमाण पत्र मान्य (${profile.disabilityPercent || 40}%+)`,
+        reasonMalwi: `दिव्यांग प्रमाण पत्र पक्को छे (${profile.disabilityPercent || 40}%+)`,
       });
       passingReasons.push('Divyang status verified');
     } else {
@@ -275,6 +297,7 @@ export function evaluateSchemeEligibility(
         passed: false,
         reason: `Scheme is exclusively for persons with ${rules.minDisabilityPercent || 40}%+ certified disability`,
         reasonHindi: `यह योजना केवल ${rules.minDisabilityPercent || 40}%+ प्रमाणित दिव्यांगजनों हेतु है`,
+        reasonMalwi: `या योजना खाली ${rules.minDisabilityPercent || 40}%+ दिव्यांग भाई-बहनों खातर छे`,
       });
       failingReasons.push('Requires certified disability certificate (UDID)');
       hardDisqualification = true;
@@ -289,6 +312,7 @@ export function evaluateSchemeEligibility(
         passed: true,
         reason: `Marital status (${profile.maritalStatus}) is eligible`,
         reasonHindi: `वैवाहिक स्थिति (${profile.maritalStatus}) योजना के अनुरूप`,
+        reasonMalwi: `ब्याह री स्थिति (${profile.maritalStatus}) योजना खातर सही छे`,
       });
       passingReasons.push(`Marital status (${profile.maritalStatus}) eligible`);
     } else {
@@ -297,6 +321,7 @@ export function evaluateSchemeEligibility(
         passed: false,
         reason: `Allowed marital status: ${rules.allowedMaritalStatus.join(', ')}`,
         reasonHindi: `केवल इन वैवाहिक स्थितियों हेतु मान्य: ${rules.allowedMaritalStatus.join(', ')}`,
+        reasonMalwi: `खाली ई ब्याह स्थिति खातर मान्य छे: ${rules.allowedMaritalStatus.join(', ')}`,
       });
       failingReasons.push(`Marital status (${profile.maritalStatus}) not eligible`);
       hardDisqualification = true;
@@ -311,6 +336,7 @@ export function evaluateSchemeEligibility(
         passed: true,
         reason: 'Valid BPL/Antyodaya ration card verified',
         reasonHindi: 'बीपीएल / अन्त्योदय राशन कार्ड सत्यापित',
+        reasonMalwi: 'बीपीएल / पीलो राशन कार्ड पक्को छे',
       });
       passingReasons.push('BPL status confirmed');
     } else {
@@ -319,6 +345,7 @@ export function evaluateSchemeEligibility(
         passed: false,
         reason: 'Requires valid BPL or Antyodaya ration card',
         reasonHindi: 'बीपीएल अथवा अन्त्योदय राशन कार्ड होना अनिवार्य है',
+        reasonMalwi: 'बीपीएल या अंत्योदय राशन कार्ड होणो जरूरी छे',
       });
       failingReasons.push('Requires active BPL / Antyodaya status');
       hardDisqualification = true;

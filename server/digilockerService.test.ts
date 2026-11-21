@@ -35,7 +35,6 @@ test('resolveAppBaseUrl prefers APP_URL over request headers', () => {
   const base = resolveAppBaseUrl({
     protocol: 'http',
     headers: { host: 'localhost:3000' },
-    get: (name: string) => (name.toLowerCase() === 'host' ? 'localhost:3000' : undefined),
   });
   assert.equal(base, 'https://yojanasetu.example.gov.in');
   assert.equal(

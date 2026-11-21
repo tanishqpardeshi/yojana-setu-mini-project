@@ -1019,7 +1019,7 @@ function initSqlite(): void {
   `);
 
   const backfillPortalUrlStmt = db.prepare(`
-    UPDATE schemes SET apply_url = ? WHERE id = ? AND (apply_url IS NULL OR trim(apply_url) = '')
+    UPDATE schemes SET apply_url = ? WHERE id = ? AND (data_origin = 'baseline_catalog' OR apply_url IS NULL OR trim(apply_url) = '')
   `);
 
   const nowIso = new Date().toISOString();

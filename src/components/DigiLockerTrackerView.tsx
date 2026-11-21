@@ -23,6 +23,7 @@ import {
 import { STANDARD_DOCUMENTS } from '../data/indoreGovernance';
 import { parseApiResponse } from '../utils/apiClient';
 import { ToastItem } from './ToastContainer';
+import { getDocumentLabel, pickText } from '../utils/i18n';
 
 interface DigiLockerTrackerViewProps {
   currentLanguage: SupportedLanguage;
@@ -50,6 +51,9 @@ export const DigiLockerTrackerView: React.FC<DigiLockerTrackerViewProps> = ({
   onNavigateToSamagra,
   onNotify,
 }) => {
+  const t = (en: string, hi: string, malwi: string) =>
+    pickText(currentLanguage, { en, hi, malwi });
+
   const [connectingOAuth, setConnectingOAuth] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [revokingKey, setRevokingKey] = useState<string | null>(null);
@@ -153,9 +157,8 @@ export const DigiLockerTrackerView: React.FC<DigiLockerTrackerViewProps> = ({
         state?: string;
       }>(res);
 
-      const rawExtra = parsed.rawBody as { redirectUri?: string } | null;
-      if (rawExtra?.redirectUri) {
-        setOauthRedirectUri(rawExtra.redirectUri);
+      if (parsed.data?.redirectUri) {
+        setOauthRedirectUri(parsed.data.redirectUri);
       }
 
       if (!parsed.ok || !parsed.data?.url) {
@@ -293,18 +296,26 @@ export const DigiLockerTrackerView: React.FC<DigiLockerTrackerViewProps> = ({
           <div className="flex items-center space-x-2">
             <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse"></span>
             <span className="text-xs font-bold text-blue-800 uppercase tracking-wider bg-blue-100 px-2 py-0.5 rounded">
-              Official DigiLocker OAuth 2.0 + PKCE
+              {t(
+                'Official DigiLocker OAuth 2.0 + PKCE',
+                'आधिकारिक डिजिलॉकर OAuth 2.0 + PKCE',
+                'सरकारी डिजिलॉकर कागजात वॉलेट (OAuth 2.0)'
+              )}
             </span>
           </div>
           <h2 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight mt-1 font-heading">
-            {currentLanguage === 'hi'
-              ? 'आधिकारिक डिजिलॉकर दस्तावेज़ वॉलेट (OAuth 2.0)'
-              : currentLanguage === 'malwi'
-              ? 'कागजात लॉकर (डिजिलॉकर OAuth 2.0)'
-              : 'Official DigiLocker Document Wallet'}
+            {t(
+              'Official DigiLocker Document Wallet',
+              'आधिकारिक डिजिलॉकर दस्तावेज़ वॉलेट (OAuth 2.0)',
+              'सरकारी कागजात लॉकर (डिजिलॉकर वॉलेट)'
+            )}
           </h2>
           <p className="text-sm text-slate-500">
-            Authenticate directly via Government of India DigiLocker (MeriPehchaan OAuth 2.0 + PKCE) to fetch and store issuer-signed certificates.
+            {t(
+              'Authenticate directly via Government of India DigiLocker (MeriPehchaan OAuth 2.0 + PKCE) to fetch and store issuer-signed certificates.',
+              'भारत सरकार के डिजिलॉकर (मेरीपहचान OAuth 2.0 + PKCE) से सीधे जुड़ें और सत्यापित प्रमाण पत्र प्राप्त करें।',
+              'भारत सरकार रा डिजिलॉकर (मेरीपहचान) सूं सीधा जुड़ो अने तमारा पक्का सरकारी कागद अठे लावो।'
+            )}
           </p>
         </div>
 
@@ -314,9 +325,16 @@ export const DigiLockerTrackerView: React.FC<DigiLockerTrackerViewProps> = ({
             {percentage}%
           </div>
           <div>
-            <div className="text-xs font-bold text-slate-900">Wallet Readiness</div>
+            <div className="text-xs font-bold text-slate-900">
+              {t('Wallet Readiness', 'दस्तावेज़ तैयारी', 'कागजात तैयारी')}
+            </div>
             <div className="text-xs text-slate-500">
-              <strong>{verifiedCount}</strong> of {totalDocs} scheme docs verified
+              <strong>{verifiedCount}</strong>{' '}
+              {t(
+                `of ${totalDocs} scheme docs verified`,
+                `/ ${totalDocs} योजना दस्तावेज़ सत्यापित`,
+                `/ ${totalDocs} सरकारी कागद पक्का छे`
+              )}
             </div>
           </div>
         </div>
@@ -329,10 +347,18 @@ export const DigiLockerTrackerView: React.FC<DigiLockerTrackerViewProps> = ({
             <KeyRound className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
             <div>
               <h3 className="text-xs font-black text-amber-950">
-                Link a Samagra Member ID or Sign In to Bind Credentials to Your Citizen Profile
+                {t(
+                  'Link a Samagra Member ID or Sign In to Bind Credentials to Your Citizen Profile',
+                  'अपने दस्तावेजों को नागरिक प्रोफाइल से जोड़ने के लिए समग्र सदस्य आईडी लिंक करें या लॉगिन करें',
+                  'तमारा कागद ने अपणा खाता सूं जोड़ण खातर समग्र सदस्य नंबर जोड़ो या लॉगिन करो'
+                )}
               </h3>
               <p className="text-xs text-amber-900 mt-0.5">
-                Linking your 9-digit Samagra Member ID or signing in ensures OAuth-fetched DigiLocker certificates automatically match across schemes.
+                {t(
+                  'Linking your 9-digit Samagra Member ID or signing in ensures OAuth-fetched DigiLocker certificates automatically match across schemes.',
+                  '9-अंकीय समग्र सदस्य आईडी लिंक करने पर डिजिलॉकर प्रमाण पत्र सभी योजनाओं में स्वतः मान्य हो जाते हैं।',
+                  '9 अंक रो समग्र सदस्य नंबर जोड़ण सूं डिजिलॉकर रा कागद सगळी योजना मां अपने-आप मिल जावे छे।'
+                )}
               </p>
             </div>
           </div>
@@ -341,7 +367,7 @@ export const DigiLockerTrackerView: React.FC<DigiLockerTrackerViewProps> = ({
             onClick={onNavigateToSamagra}
             className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-xs whitespace-nowrap cursor-pointer"
           >
-            <span>Open Samagra Portal</span>
+            <span>{t('Open Samagra Portal', 'समग्र पोर्टल खोलें', 'समग्र खाता खोलो')}</span>
             <ArrowRight className="w-3.5 h-3.5" />
           </button>
         </div>
@@ -358,8 +384,8 @@ export const DigiLockerTrackerView: React.FC<DigiLockerTrackerViewProps> = ({
               <h3 className="text-lg font-bold font-heading flex items-center flex-wrap gap-2">
                 <span>
                   {citizenKey
-                    ? `Wallet: ${profile.fullName || 'Citizen'} (${citizenKey})`
-                    : 'DigiLocker Government Gateway'}
+                    ? `${t('Wallet:', 'वॉलेट:', 'लॉकर:')} ${profile.fullName || t('Citizen', 'नागरिक', 'नागरिक')} (${citizenKey})`
+                    : t('DigiLocker Government Gateway', 'डिजिलॉकर सरकारी गेटवे', 'डिजिलॉकर सरकारी सेवा')}
                 </span>
                 <span
                   className={`text-[11px] px-2.5 py-0.5 rounded-full font-mono border ${
@@ -368,11 +394,17 @@ export const DigiLockerTrackerView: React.FC<DigiLockerTrackerViewProps> = ({
                       : 'bg-amber-500/20 text-amber-200 border-amber-400/30'
                   }`}
                 >
-                  {oauthMeta?.oauthConfigured ? 'OAuth 2.0 Configured' : 'Credentials Required'}
+                  {oauthMeta?.oauthConfigured
+                    ? t('OAuth 2.0 Configured', 'OAuth 2.0 सक्रिय', 'OAuth 2.0 चालू छे')
+                    : t('Credentials Required', 'क्रेडेंशियल आवश्यक', 'क्रेडेंशियल जरूरी')}
                 </span>
               </h3>
               <p className="text-xs text-blue-100/80 max-w-2xl mt-1 leading-relaxed">
-                Uses Authorization Code + PKCE (S256) against DigiLocker MeriPehchaan. Only verified certificates returned by the official DigiLocker issued-documents API are saved.
+                {t(
+                  'Uses Authorization Code + PKCE (S256) against DigiLocker MeriPehchaan. Only verified certificates returned by the official DigiLocker issued-documents API are saved.',
+                  'डिजिलॉकर मेरीपहचान के साथ सुरक्षित OAuth 2.0 + PKCE का उपयोग करता है। केवल आधिकारिक रूप से जारी प्रमाण पत्र ही सहेजे जाते हैं।',
+                  'डिजिलॉकर मेरीपहचान सूं सुरक्षित जुड़ाव। सिर्फ सरकारी डिजिलॉकर सूं आया पक्का प्रमाण पत्र ही अठे सुरक्षित रखे जावे छे।'
+                )}
               </p>
             </div>
           </div>
@@ -386,7 +418,7 @@ export const DigiLockerTrackerView: React.FC<DigiLockerTrackerViewProps> = ({
                 className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-white text-xs font-bold inline-flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
-                <span>Refresh</span>
+                <span>{t('Refresh', 'रिफ्रेश', 'ताजा करो')}</span>
               </button>
             )}
             <button
@@ -399,12 +431,18 @@ export const DigiLockerTrackerView: React.FC<DigiLockerTrackerViewProps> = ({
               {connectingOAuth ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Authorizing DigiLocker...</span>
+                  <span>{t('Authorizing DigiLocker...', 'डिजिलॉकर सत्यापन जारी...', 'डिजिलॉकर जुड़ रयो छे...')}</span>
                 </>
               ) : (
                 <>
                   <ExternalLink className="w-4 h-4" />
-                  <span>Connect Official DigiLocker (OAuth 2.0 + PKCE)</span>
+                  <span>
+                    {t(
+                      'Connect Official DigiLocker (OAuth 2.0 + PKCE)',
+                      'आधिकारिक डिजिलॉकर जोड़ें (OAuth 2.0)',
+                      'सरकारी डिजिलॉकर जोड़ो'
+                    )}
+                  </span>
                 </>
               )}
             </button>
@@ -419,7 +457,11 @@ export const DigiLockerTrackerView: React.FC<DigiLockerTrackerViewProps> = ({
             className="rounded text-amber-500 w-4 h-4"
           />
           <span>
-            I grant explicit consent to authenticate with Government of India DigiLocker (MeriPehchaan) and import my issued certificates into YojanaSetu.
+            {t(
+              'I grant explicit consent to authenticate with Government of India DigiLocker (MeriPehchaan) and import my issued certificates into YojanaSetu.',
+              'मैं भारत सरकार के डिजिलॉकर (मेरीपहचान) से सत्यापन करने और अपने प्रमाण पत्र योजनासेतु में लाने की सहमति देता/देती हूँ।',
+              'म्हूं भारत सरकार रा डिजिलॉकर सूं अपणा सरकारी कागद योजनासेतु मां लावण री पूरी सहमति देऊं छूं।'
+            )}
           </span>
         </label>
       </div>
@@ -505,10 +547,18 @@ export const DigiLockerTrackerView: React.FC<DigiLockerTrackerViewProps> = ({
         <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between gap-2">
           <div>
             <h3 className="text-sm font-black text-slate-900">
-              Synced DigiLocker Issued Documents ({credentials.length})
+              {t(
+                `Synced DigiLocker Issued Documents (${credentials.length})`,
+                `सिंक किए गए डिजिलॉकर दस्तावेज़ (${credentials.length})`,
+                `डिजिलॉकर सूं जुड़योड़ा पक्का कागद (${credentials.length})`
+              )}
             </h3>
             <p className="text-xs text-slate-500">
-              Official URIs fetched via DigiLocker OAuth 2.0 and deduplicated per citizen account.
+              {t(
+                'Official URIs fetched via DigiLocker OAuth 2.0 and deduplicated per citizen account.',
+                'डिजिलॉकर OAuth 2.0 द्वारा प्राप्त और नागरिक खाते में सुरक्षित किए गए आधिकारिक दस्तावेज़।',
+                'डिजिलॉकर सूं लाया गया तमारा असली सरकारी कागद।'
+              )}
             </p>
           </div>
         </div>
@@ -517,10 +567,18 @@ export const DigiLockerTrackerView: React.FC<DigiLockerTrackerViewProps> = ({
           <div className="p-8 text-center space-y-2">
             <FileText className="w-8 h-8 text-slate-300 mx-auto" />
             <p className="text-xs font-bold text-slate-700">
-              No Official DigiLocker Issued Documents Synced Yet
+              {t(
+                'No Official DigiLocker Issued Documents Synced Yet',
+                'अभी कोई डिजिलॉकर दस्तावेज़ सिंक नहीं हुआ है',
+                'अभी कोई डिजिलॉकर कागद जुड़यो नी छे'
+              )}
             </p>
             <p className="text-xs text-slate-500 max-w-md mx-auto">
-              Click "Connect Official DigiLocker (OAuth 2.0 + PKCE)" above to authenticate with DigiLocker and import your Aadhaar, Caste, Income, Domicile, or Land Record certificates.
+              {t(
+                'Click "Connect Official DigiLocker (OAuth 2.0 + PKCE)" above to authenticate with DigiLocker and import your Aadhaar, Caste, Income, Domicile, or Land Record certificates.',
+                'अपना आधार, जाति, आय, मूल निवासी या खसरा प्रमाण पत्र लाने के लिए ऊपर "आधिकारिक डिजिलॉकर जोड़ें" पर क्लिक करें।',
+                'आधार, जाति, कमाई, मूल निवासी या खसरा कागद लावण खातर ऊपर "सरकारी डिजिलॉकर जोड़ो" बटन दबावो।'
+              )}
             </p>
           </div>
         ) : (
@@ -539,11 +597,14 @@ export const DigiLockerTrackerView: React.FC<DigiLockerTrackerViewProps> = ({
                       </span>
                     )}
                     <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
-                      Verified OAuth
+                      {t('Verified OAuth', 'सत्यापित', 'पक्को कागद')}
                     </span>
                   </div>
                   <div className="text-xs text-slate-500 flex flex-wrap gap-x-3 gap-y-0.5">
-                    <span>Issuer: <strong className="text-slate-700">{cred.issuer}</strong></span>
+                    <span>
+                      {t('Issuer:', 'जारीकर्ता:', 'जारी करण वालो:')}{' '}
+                      <strong className="text-slate-700">{cred.issuer}</strong>
+                    </span>
                     <span className="font-mono">URI: {cred.docUri}</span>
                     {cred.docNumber && <span className="font-mono">Ref: {cred.docNumber}</span>}
                   </div>
@@ -559,7 +620,7 @@ export const DigiLockerTrackerView: React.FC<DigiLockerTrackerViewProps> = ({
                   ) : (
                     <Trash2 className="w-3.5 h-3.5" />
                   )}
-                  <span>Revoke</span>
+                  <span>{t('Revoke', 'हटाएं', 'हटावो')}</span>
                 </button>
               </div>
             ))}
@@ -570,13 +631,18 @@ export const DigiLockerTrackerView: React.FC<DigiLockerTrackerViewProps> = ({
       {/* Scheme Document Readiness Matrix */}
       <div className="space-y-3">
         <h3 className="text-sm font-black text-slate-900">
-          Scheme Document Readiness Matrix ({verifiedCount}/{totalDocs})
+          {t(
+            `Scheme Document Readiness Matrix (${verifiedCount}/${totalDocs})`,
+            `योजना दस्तावेज़ तैयारी सूची (${verifiedCount}/${totalDocs})`,
+            `योजना रा जरूरी कागजात री स्थिति (${verifiedCount}/${totalDocs})`
+          )}
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {STANDARD_DOCUMENTS.map(doc => {
             const verifiedRecord = profile.verifiedDocuments?.[doc.id];
             const isVerified = Boolean(verifiedRecord?.verified);
             const isRevoking = revokingKey === doc.id;
+            const localizedDocName = getDocumentLabel(doc.id, currentLanguage);
 
             return (
               <div
@@ -602,24 +668,24 @@ export const DigiLockerTrackerView: React.FC<DigiLockerTrackerViewProps> = ({
                     {isVerified ? (
                       <span className="flex items-center space-x-1 text-[10px] font-black uppercase bg-emerald-100 text-emerald-800 px-2.5 py-0.5 rounded-full border border-emerald-300">
                         <CheckCircle2 className="w-3 h-3" />
-                        <span>Verified via OAuth</span>
+                        <span>{t('Verified via OAuth', 'सत्यापित', 'पक्को कागद')}</span>
                       </span>
                     ) : (
                       <span className="flex items-center space-x-1 text-[10px] font-bold uppercase bg-amber-100 text-amber-800 px-2.5 py-0.5 rounded-full">
                         <AlertCircle className="w-3 h-3" />
-                        <span>Not Synced</span>
+                        <span>{t('Not Synced', 'लिंक नहीं', 'अभी बाकी')}</span>
                       </span>
                     )}
                   </div>
 
-                  <h4 className="text-base font-bold text-slate-900">{doc.name}</h4>
+                  <h4 className="text-base font-bold text-slate-900">{localizedDocName}</h4>
                   <p className="text-xs font-devanagari font-semibold text-slate-500 mt-0.5">
-                    {doc.nameHindi}
+                    {currentLanguage === 'en' ? doc.nameHindi : doc.name}
                   </p>
 
                   <div className="mt-3 pt-2 border-t border-slate-100 text-xs space-y-1">
                     <div className="text-slate-500">
-                      Issuing Authority:{' '}
+                      {t('Issuing Authority:', 'जारीकर्ता विभाग:', 'कागद देवण वालो विभाग:')}{' '}
                       <strong className="text-slate-700">{doc.issuingAuthority}</strong>
                     </div>
 
@@ -631,7 +697,8 @@ export const DigiLockerTrackerView: React.FC<DigiLockerTrackerViewProps> = ({
 
                     {isVerified && verifiedRecord?.verifiedAt && (
                       <div className="text-[10px] text-emerald-700">
-                        Synced: {new Date(verifiedRecord.verifiedAt).toLocaleString('en-IN')}
+                        {t('Synced:', 'सत्यापित समय:', 'जुड़ण रो समय:')}{' '}
+                        {new Date(verifiedRecord.verifiedAt).toLocaleString('en-IN')}
                       </div>
                     )}
                   </div>
@@ -643,12 +710,14 @@ export const DigiLockerTrackerView: React.FC<DigiLockerTrackerViewProps> = ({
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-[11px] font-semibold text-emerald-700 flex items-center space-x-1">
                         <Lock className="w-3 h-3" />
-                        <span>Source: {verifiedRecord.source.toUpperCase()}</span>
+                        <span>
+                          {t('Source:', 'स्रोत:', 'स्रोत:')} {verifiedRecord.source.toUpperCase()}
+                        </span>
                       </span>
                       <button
                         type="button"
                         disabled={isRevoking}
-                        onClick={() => handleRevokeDocument(doc.id, doc.name)}
+                        onClick={() => handleRevokeDocument(doc.id, localizedDocName)}
                         className="text-[11px] font-bold text-rose-600 hover:text-rose-800 inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
                       >
                         {isRevoking ? (
@@ -656,7 +725,7 @@ export const DigiLockerTrackerView: React.FC<DigiLockerTrackerViewProps> = ({
                         ) : (
                           <Trash2 className="w-3 h-3" />
                         )}
-                        <span>Revoke</span>
+                        <span>{t('Revoke', 'हटाएं', 'हटावो')}</span>
                       </button>
                     </div>
                   ) : (
@@ -671,7 +740,9 @@ export const DigiLockerTrackerView: React.FC<DigiLockerTrackerViewProps> = ({
                       ) : (
                         <ExternalLink className="w-3.5 h-3.5" />
                       )}
-                      <span>Sync via Official DigiLocker</span>
+                      <span>
+                        {t('Sync via Official DigiLocker', 'डिजिलॉकर से जोड़ें', 'डिजिलॉकर सूं जोड़ो')}
+                      </span>
                     </button>
                   )}
                 </div>

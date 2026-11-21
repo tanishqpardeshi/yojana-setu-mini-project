@@ -8,8 +8,10 @@ import {
   evaluateSchemesRealtimeStatus,
   extractJanpadBlock,
   extractWardNumber,
+  OFFICIAL_SCHEME_PORTAL_URLS,
   resolveSchemePortalUrl,
 } from './liveDataEngine';
+import { getSchemeApplicationProcedure } from './schemeProcedures';
 import { SCHEMES_DATABASE } from '../data/schemesData';
 import { IMC_WARDS, JANPAD_BLOCKS } from '../data/indoreGovernance';
 import { ApplicationRecord, SamagraFamily, Scheme } from '../types';
@@ -22,13 +24,31 @@ test('createEmptyCitizenProfile returns clean unlinked citizen profile with zero
   assert.deepEqual(profile.verifiedDocuments, {});
 });
 
-test('resolveSchemePortalUrl maps schemes to valid https official government portals', () => {
+test('resolveSchemePortalUrl maps all 51 schemes to explicit verified https official government portals', () => {
   for (const scheme of SCHEMES_DATABASE) {
+    assert.ok(
+      OFFICIAL_SCHEME_PORTAL_URLS[scheme.id],
+      `Expected explicit official portal URL mapping for ${scheme.id}`
+    );
     const url = resolveSchemePortalUrl(scheme);
     assert.ok(url.startsWith('https://'), `Expected https portal URL for ${scheme.id}, got ${url}`);
   }
   const pmKisan = SCHEMES_DATABASE.find(s => s.id === 'pm_kisan')!;
   assert.equal(resolveSchemePortalUrl(pmKisan), 'https://pmkisan.gov.in/');
+  const pmfby = SCHEMES_DATABASE.find(s => s.id === 'pmfby_crop_insurance')!;
+  assert.equal(resolveSchemePortalUrl(pmfby), 'https://pmfby.gov.in/');
+});
+
+test('getSchemeApplicationProcedure returns complete EN, HI, and Malwi procedures for all 51 schemes', () => {
+  for (const scheme of SCHEMES_DATABASE) {
+    for (const lang of ['en', 'hi', 'malwi'] as const) {
+      const proc = getSchemeApplicationProcedure(scheme, lang);
+      assert.ok(proc.portalUrl.startsWith('https://'));
+      assert.ok(proc.mode.length > 5);
+      assert.ok(proc.estimatedTime.length > 3);
+      assert.ok(proc.steps.length >= 4, `Expected >= 4 steps for ${scheme.id} in ${lang}`);
+    }
+  }
 });
 
 test('evaluateSchemesRealtimeStatus reports baseline_unverified when portals are unchecked', () => {

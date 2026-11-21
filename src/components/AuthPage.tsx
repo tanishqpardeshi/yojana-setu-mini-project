@@ -49,6 +49,13 @@ import {
   validateSamagraLookupId,
   validateSamagraMemberId,
 } from '../utils/samagraValidator';
+import {
+  getCategoryLabel,
+  getGenderLabel,
+  getMaritalLabel,
+  getOccupationLabel,
+  pickText,
+} from '../utils/i18n';
 
 interface AuthPageProps {
   currentLanguage: SupportedLanguage;
@@ -623,17 +630,20 @@ export const AuthPage: React.FC<AuthPageProps> = ({
     }
   };
 
-  const headingTitle =
-    currentLanguage === 'hi'
-      ? 'नागरिक लॉगिन एवं पंजीकरण पोर्टल'
-      : currentLanguage === 'malwi'
-      ? 'नागरिक खाता लॉगिन व पंजीयन'
-      : 'Citizen Login & Registration';
+  const t = (en: string, hi: string, malwi: string) =>
+    pickText(currentLanguage, { en, hi, malwi });
 
-  const headingSub =
-    currentLanguage === 'hi'
-      ? 'Google, समग्र आईडी (8/9 अंक) या ईमेल द्वारा सुरक्षित प्रवेश करें और अपनी पात्रता व आवेदन क्लाउड में सहेजें।'
-      : 'Access personalized Indore District schemes, Samagra household verification, saved bookmarks, and ARN status tracking.';
+  const headingTitle = t(
+    'Citizen Login & Registration',
+    'नागरिक लॉगिन एवं पंजीकरण पोर्टल',
+    'नागरिक खाता लॉगिन व पंजीयन'
+  );
+
+  const headingSub = t(
+    'Access personalized Indore District schemes, Samagra household verification, saved bookmarks, and ARN status tracking.',
+    'Google, समग्र आईडी (8/9 अंक) या ईमेल द्वारा सुरक्षित प्रवेश करें और अपनी पात्रता व आवेदन क्लाउड में सहेजें।',
+    'Google, समग्र आईडी (8/9 अंक) या ईमेल सूं सुरक्षित लॉगिन करो अने इंदौर जिला री योजना, सहेज्योड़ी लिस्ट व अर्जी री स्थिति देखो।'
+  );
 
   return (
     <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 lg:py-12">
@@ -651,7 +661,11 @@ export const AuthPage: React.FC<AuthPageProps> = ({
         <div className="lg:col-span-5 space-y-6">
           <div className="space-y-3">
             <p className="text-xs font-semibold uppercase tracking-wider text-amber-700">
-              Indore District Unified Citizen Access
+              {t(
+                'Indore District Unified Citizen Access',
+                'इंदौर जिला एकीकृत नागरिक प्रवेश',
+                'इंदौर जिला नागरिक खाता सेवा'
+              )}
             </p>
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 font-heading text-balance">
               {headingTitle}
@@ -694,28 +708,38 @@ export const AuthPage: React.FC<AuthPageProps> = ({
 
               <div className="border-t border-slate-100 pt-4 grid grid-cols-2 gap-4 text-xs">
                 <div>
-                  <span className="text-slate-500 block">Samagra Family ID</span>
+                  <span className="text-slate-500 block">
+                    {t('Samagra Family ID', 'समग्र परिवार आईडी', 'समग्र कुटुंब नंबर')}
+                  </span>
                   <span className="font-mono tabular-nums font-bold text-slate-900 text-sm">
-                    {activeAccountProfile?.samagraFamilyId || citizenProfile.samagraFamilyId || 'Not linked'}
+                    {activeAccountProfile?.samagraFamilyId || citizenProfile.samagraFamilyId || t('Not linked', 'लिंक नहीं', 'जुड़यो नी')}
                   </span>
                 </div>
                 <div>
-                  <span className="text-slate-500 block">Samagra Member ID</span>
+                  <span className="text-slate-500 block">
+                    {t('Samagra Member ID', 'समग्र सदस्य आईडी', 'समग्र सदस्य नंबर')}
+                  </span>
                   <span className="font-mono tabular-nums font-bold text-slate-900 text-sm">
-                    {activeAccountProfile?.samagraMemberId || citizenProfile.samagraMemberId || 'Not linked'}
+                    {activeAccountProfile?.samagraMemberId || citizenProfile.samagraMemberId || t('Not linked', 'लिंक नहीं', 'जुड़यो नी')}
                   </span>
                 </div>
                 <div>
-                  <span className="text-slate-500 block">Jurisdiction</span>
+                  <span className="text-slate-500 block">
+                    {t('Jurisdiction', 'क्षेत्राधिकार', 'इलाको')}
+                  </span>
                   <span className="font-semibold text-slate-900">
                     {(activeAccountProfile?.areaType || citizenProfile.areaType) === 'urban'
-                      ? `IMC Ward ${activeAccountProfile?.wardNumber ?? citizenProfile.wardNumber ?? 72}`
-                      : `${activeAccountProfile?.blockName || citizenProfile.blockName || 'Indore'} Janpad`}
+                      ? `${t('IMC Ward', 'निगम वार्ड', 'निगम वार्ड')} ${activeAccountProfile?.wardNumber ?? citizenProfile.wardNumber ?? 72}`
+                      : `${activeAccountProfile?.blockName || citizenProfile.blockName || 'Indore'} ${t('Janpad', 'जनपद', 'जनपद')}`}
                   </span>
                 </div>
                 <div>
-                  <span className="text-slate-500 block">Account Role</span>
-                  <span className="font-semibold text-emerald-700">Citizen</span>
+                  <span className="text-slate-500 block">
+                    {t('Account Role', 'खाता भूमिका', 'खाता प्रकार')}
+                  </span>
+                  <span className="font-semibold text-emerald-700">
+                    {t('Citizen', 'नागरिक', 'नागरिक')}
+                  </span>
                 </div>
               </div>
 
@@ -725,21 +749,21 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                   className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold transition whitespace-nowrap cursor-pointer"
                 >
                   <Sparkles className="w-3.5 h-3.5" />
-                  <span>Check Eligibility</span>
+                  <span>{t('Check Eligibility', 'पात्रता जांचें', 'पात्रता देखो')}</span>
                 </button>
                 <button
                   onClick={onOpenSavedSchemes}
                   className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold transition whitespace-nowrap cursor-pointer"
                 >
                   <Bookmark className="w-3.5 h-3.5 text-amber-600" />
-                  <span>Saved ({savedSchemesCount})</span>
+                  <span>{t(`Saved (${savedSchemesCount})`, `सहेजी (${savedSchemesCount})`, `सहेजी (${savedSchemesCount})`)}</span>
                 </button>
                 <button
                   onClick={() => onNavigateTab('tracker')}
                   className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold transition whitespace-nowrap cursor-pointer"
                 >
                   <FileText className="w-3.5 h-3.5 text-slate-600" />
-                  <span>Track ARN</span>
+                  <span>{t('Track ARN', 'आवेदन ट्रैक करें', 'अर्जी देखो')}</span>
                 </button>
                 <button
                   onClick={async () => {
@@ -750,42 +774,67 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                   className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white hover:bg-rose-50 text-rose-700 border border-rose-200 text-xs font-semibold transition whitespace-nowrap cursor-pointer ml-auto"
                 >
                   <LogOut className="w-3.5 h-3.5" />
-                  <span>Sign Out</span>
+                  <span>{t('Sign Out', 'लॉग आउट', 'बाहर निकलो')}</span>
                 </button>
               </div>
             </div>
           ) : (
             <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
               <h2 className="text-sm font-bold text-slate-900">
-                Why Register on YojanaSetu Indore?
+                {t(
+                  'Why Register on YojanaSetu Indore?',
+                  'योजनासेतु इंदौर पर पंजीकरण क्यों करें?',
+                  'योजनासेतु इंदौर पर खाता क्यूं बणावो?'
+                )}
               </h2>
               <ul className="space-y-3 text-xs text-slate-600">
                 <li className="flex items-start gap-2.5">
                   <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
                   <span>
-                    <strong className="text-slate-900">Cloud Profile Persistence:</strong> Save your age, income, ward/block, and category securely in Firebase Firestore across sessions.
+                    <strong className="text-slate-900">
+                      {t('Cloud Profile Persistence:', 'सुरक्षित प्रोफाइल सिंक:', 'खाता मां जानकारी सुरक्षित:')}
+                    </strong>{' '}
+                    {t(
+                      'Save your age, income, ward/block, and category securely across sessions.',
+                      'अपनी आयु, आय, वार्ड/ब्लॉक और वर्ग को सुरक्षित रूप से सहेजें।',
+                      'तमारी उमर, कमाई, वार्ड/ब्लॉक अने वर्ग हमेशा सुरक्षित रहे।'
+                    )}
                   </span>
                 </li>
                 <li className="flex items-start gap-2.5">
                   <Users className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                   <span>
-                    <strong className="text-slate-900">Samagra 8 & 9-Digit Linking:</strong> Connect your Madhya Pradesh Samagra Family & Member ID for instant household scheme discovery.
+                    <strong className="text-slate-900">
+                      {t('Samagra 8 & 9-Digit Linking:', 'समग्र 8 व 9 अंक लिंकिंग:', 'समग्र नंबर जोड़ो:')}
+                    </strong>{' '}
+                    {t(
+                      'Connect your Madhya Pradesh Samagra Family & Member ID for instant household scheme discovery.',
+                      'तुरंत पारिवारिक योजना खोज के लिए अपनी म.प्र. समग्र परिवार व सदस्य आईडी जोड़ें।',
+                      'पूरा घर री योजना तुरंत देखण खातर अपणो समग्र कुटुंब व सदस्य नंबर जोड़ो।'
+                    )}
                   </span>
                 </li>
                 <li className="flex items-start gap-2.5">
                   <Bookmark className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
                   <span>
-                    <strong className="text-slate-900">Bookmark & Apply Faster:</strong> Save shortlisted schemes, auto-fill online applications, and track 15-digit ARN status.
+                    <strong className="text-slate-900">
+                      {t('Bookmark & Apply Faster:', 'सहेजें व तुरंत आवेदन करें:', 'सहेजो अने जल्दी अर्जी भरो:')}
+                    </strong>{' '}
+                    {t(
+                      'Save shortlisted schemes, auto-fill online applications, and track 15-digit ARN status.',
+                      'पसंदीदा योजनाएं सहेजें, ऑनलाइन फॉर्म भरें और ARN स्थिति ट्रैक करें।',
+                      'काम री योजना सहेजो, ऑनलाइन फॉर्म भरो अने पक्की पावती (ARN) री स्थिति देखो।'
+                    )}
                   </span>
                 </li>
               </ul>
 
               <div className="border-t border-slate-100 pt-4 flex items-center gap-3 text-xs text-slate-500 font-medium tabular-nums">
-                <span>51 Verified Schemes</span>
+                <span>{t('51 Verified Schemes', '51 सत्यापित योजनाएं', '51 पक्की योजना')}</span>
                 <span aria-hidden="true">·</span>
-                <span>85 IMC Wards</span>
+                <span>{t('85 IMC Wards', '85 निगम वार्ड', '85 निगम वार्ड')}</span>
                 <span aria-hidden="true">·</span>
-                <span>4 Rural Janpads</span>
+                <span>{t('4 Rural Janpads', '4 ग्रामीण जनपद', '4 गाँव जनपद')}</span>
               </div>
             </div>
           )}
@@ -794,17 +843,20 @@ export const AuthPage: React.FC<AuthPageProps> = ({
           {!activeCitizenUser && (
             <div className="bg-slate-900 text-slate-100 rounded-2xl p-5 space-y-2">
               <div className="flex items-center justify-between text-xs text-slate-400">
-                <span>Active Local Citizen Session</span>
+                <span>{t('Active Local Citizen Session', 'सक्रिय स्थानीय नागरिक सत्र', 'अभी चालू नागरिक प्रोफाइल')}</span>
                 <span className="font-mono tabular-nums text-amber-400">
-                  Samagra {citizenProfile.samagraFamilyId || '—'}
+                  {t('Samagra', 'समग्र', 'समग्र')} {citizenProfile.samagraFamilyId || '—'}
                 </span>
               </div>
-              <div className="text-sm font-bold text-white">{citizenProfile.fullName}</div>
+              <div className="text-sm font-bold text-white">
+                {citizenProfile.fullName || t('Guest Citizen', 'अतिथि नागरिक', 'नयो नागरिक')}
+              </div>
               <div className="text-xs text-slate-300">
                 {citizenProfile.areaType === 'urban'
-                  ? `IMC Ward ${citizenProfile.wardNumber ?? 72}`
-                  : `${citizenProfile.blockName || 'Indore'} Janpad`}{' '}
-                · {citizenProfile.occupation} · ₹{citizenProfile.annualIncome.toLocaleString('en-IN')}/yr
+                  ? `${t('IMC Ward', 'निगम वार्ड', 'निगम वार्ड')} ${citizenProfile.wardNumber ?? 72}`
+                  : `${citizenProfile.blockName || 'Indore'} ${t('Janpad', 'जनपद', 'जनपद')}`}{' '}
+                · {getOccupationLabel(citizenProfile.occupation, currentLanguage)} · ₹
+                {citizenProfile.annualIncome.toLocaleString('en-IN')}/{t('yr', 'वर्ष', 'साल')}
               </div>
             </div>
           )}
@@ -840,12 +892,18 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                 <div className="flex items-center justify-between border-b border-slate-100 pb-4">
                   <div>
                     <h2 className="text-lg font-bold text-slate-900 font-heading">
-                      Complete & Sync Citizen Profile
+                      {t(
+                        'Complete & Sync Citizen Profile',
+                        'नागरिक प्रोफाइल पूरा करें व सहेजें',
+                        'तमारी नागरिक प्रोफाइल पूरी करो व सहेजो'
+                      )}
                     </h2>
                     <p className="text-xs text-slate-500">
-                      {citizenAccountUser
-                        ? 'Update your Samagra ID and Indore ward/block details directly in your YojanaSetu account.'
-                        : 'Link your Samagra ID and Indore ward/block details directly to your Firestore account.'}
+                      {t(
+                        'Update your Samagra ID and Indore ward/block details directly in your YojanaSetu account.',
+                        'अपनी समग्र आईडी और इंदौर वार्ड/ब्लॉक की जानकारी सीधे अपने खाते में अपडेट करें।',
+                        'अपणो समग्र नंबर अने इंदौर वार्ड/ब्लॉक री जानकारी सीधा खाता मां अपडेट करो।'
+                      )}
                     </p>
                   </div>
                 </div>
@@ -853,7 +911,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Full Name (as per Aadhaar)
+                      {t('Full Name (as per Aadhaar)', 'पूरा नाम (आधार अनुसार)', 'पूरो नाम (आधार रा हिसाब सूं)')}
                     </label>
                     <input
                       type="text"
@@ -877,31 +935,32 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                       }}
                       authToken={citizenAuthToken}
                       disabled={isSubmitting}
+                      currentLanguage={currentLanguage}
                       onNotify={onNotify}
                     />
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Samagra Family ID (8-Digit)
+                      {t('Samagra Family ID (8-Digit)', 'समग्र परिवार आईडी (8 अंक)', 'समग्र कुटुंब नंबर (8 अंक)')}
                     </label>
                     <input
                       type="text"
                       value={samagraFamilyId}
                       onChange={e => setSamagraFamilyId(e.target.value)}
-                      placeholder="8-digit Samagra Family ID"
+                      placeholder={t('8-digit Samagra Family ID', '8-अंकीय परिवार आईडी', '8 अंक रो कुटुंब नंबर')}
                       maxLength={16}
                       className="w-full px-3.5 py-2.5 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono tabular-nums"
                     />
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Samagra Member ID (9-Digit)
+                      {t('Samagra Member ID (9-Digit)', 'समग्र सदस्य आईडी (9 अंक)', 'समग्र सदस्य नंबर (9 अंक)')}
                     </label>
                     <input
                       type="text"
                       value={samagraMemberId}
                       onChange={e => setSamagraMemberId(e.target.value)}
-                      placeholder="9-digit Samagra Member ID"
+                      placeholder={t('9-digit Samagra Member ID', '9-अंकीय सदस्य आईडी', '9 अंक रो सदस्य नंबर')}
                       maxLength={16}
                       className="w-full px-3.5 py-2.5 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono tabular-nums"
                     />
@@ -909,22 +968,26 @@ export const AuthPage: React.FC<AuthPageProps> = ({
 
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Indore Area Type
+                      {t('Indore Area Type', 'इंदौर क्षेत्र प्रकार', 'शहर या गाँव क्षेत्र')}
                     </label>
                     <select
                       value={areaType}
                       onChange={e => setAreaType(e.target.value as AreaType)}
                       className="w-full px-3.5 py-2.5 text-sm border border-slate-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-amber-500"
                     >
-                      <option value="urban">Urban (Indore Municipal Corp)</option>
-                      <option value="rural">Rural (Janpad Panchayat)</option>
+                      <option value="urban">
+                        {t('Urban (Indore Municipal Corp)', 'शहरी (इंदौर नगर निगम)', 'शहर (इंदौर नगर निगम)')}
+                      </option>
+                      <option value="rural">
+                        {t('Rural (Janpad Panchayat)', 'ग्रामीण (जनपद पंचायत)', 'गाँव (जनपद पंचायत)')}
+                      </option>
                     </select>
                   </div>
 
                   {areaType === 'urban' ? (
                     <div>
                       <label className="block text-xs font-semibold text-slate-700 mb-1">
-                        IMC Ward Number (1–85)
+                        {t('IMC Ward Number (1–85)', 'नगर निगम वार्ड संख्या (1–85)', 'नगर निगम वार्ड नंबर (1–85)')}
                       </label>
                       <input
                         type="number"
@@ -938,7 +1001,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                   ) : (
                     <div>
                       <label className="block text-xs font-semibold text-slate-700 mb-1">
-                        Rural Janpad Block
+                        {t('Rural Janpad Block', 'ग्रामीण जनपद ब्लॉक', 'गाँव जनपद ब्लॉक')}
                       </label>
                       <select
                         value={blockName}
@@ -947,7 +1010,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                       >
                         {JANPAD_BLOCKS.map(b => (
                           <option key={b} value={b}>
-                            {b} Janpad
+                            {b} {t('Janpad', 'जनपद', 'जनपद')}
                           </option>
                         ))}
                       </select>
@@ -956,7 +1019,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
 
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Occupation
+                      {t('Occupation', 'व्यवसाय', 'काम-धंधो')}
                     </label>
                     <select
                       value={occupation}
@@ -965,7 +1028,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                     >
                       {OCCUPATIONS.map(o => (
                         <option key={o} value={o}>
-                          {o}
+                          {getOccupationLabel(o, currentLanguage)}
                         </option>
                       ))}
                     </select>
@@ -973,7 +1036,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
 
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Annual Family Income (₹)
+                      {t('Annual Family Income (₹)', 'वार्षिक पारिवारिक आय (₹)', 'कुटुंब री सालाना कमाई (₹)')}
                     </label>
                     <input
                       type="number"
@@ -987,7 +1050,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
 
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Age (Years)
+                      {t('Age (Years)', 'आयु (वर्ष)', 'उमर (बरस)')}
                     </label>
                     <input
                       type="number"
@@ -1001,7 +1064,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
 
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Social Category
+                      {t('Social Category', 'सामाजिक वर्ग', 'सामाजिक वर्ग')}
                     </label>
                     <select
                       value={category}
@@ -1010,7 +1073,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                     >
                       {CATEGORIES.map(c => (
                         <option key={c} value={c}>
-                          {c}
+                          {getCategoryLabel(c, currentLanguage)}
                         </option>
                       ))}
                     </select>
@@ -1025,7 +1088,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                       onChange={e => setIsBPL(e.target.checked)}
                       className="rounded border-slate-300 text-amber-600 focus:ring-amber-500"
                     />
-                    <span>BPL Ration Cardholder</span>
+                    <span>{t('BPL Ration Cardholder', 'बीपीएल राशन कार्डधारी', 'बीपीएल / पीलो राशन कार्ड')}</span>
                   </label>
                   <label className="inline-flex items-center gap-2 cursor-pointer">
                     <input
@@ -1034,7 +1097,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                       onChange={e => setHasDisability(e.target.checked)}
                       className="rounded border-slate-300 text-amber-600 focus:ring-amber-500"
                     />
-                    <span>Divyang (40%+ Disability)</span>
+                    <span>{t('Divyang (40%+ Disability)', 'दिव्यांग (40%+ विकलांगता)', 'दिव्यांग (40%+)')}</span>
                   </label>
                   <label className="inline-flex items-center gap-2 cursor-pointer">
                     <input
@@ -1043,7 +1106,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                       onChange={e => setIsMpDomicile(e.target.checked)}
                       className="rounded border-slate-300 text-amber-600 focus:ring-amber-500"
                     />
-                    <span>MP Domicile</span>
+                    <span>{t('MP Domicile', 'म.प्र. मूल निवासी', 'म.प्र. मूल निवासी')}</span>
                   </label>
                 </div>
 
@@ -1055,9 +1118,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                   >
                     {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
                     <span>
-                      {citizenAccountUser
-                        ? 'Save Citizen Profile Changes'
-                        : 'Save & Sync Profile to Firestore'}
+                      {t('Save Citizen Profile Changes', 'नागरिक प्रोफाइल सहेजें', 'प्रोफाइल बदलाव सहेजो')}
                     </span>
                   </button>
                 </div>
@@ -1082,7 +1143,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                           : 'text-slate-600 hover:text-slate-900'
                       }`}
                     >
-                      Sign In
+                      {t('Sign In', 'लॉगिन करें', 'लॉगिन करो')}
                     </button>
                     <button
                       type="button"
@@ -1099,7 +1160,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                           : 'text-slate-600 hover:text-slate-900'
                       }`}
                     >
-                      Citizen Registration
+                      {t('Citizen Registration', 'नया पंजीकरण', 'नयो खाता बनावो')}
                     </button>
                   </div>
 
@@ -1131,7 +1192,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                           : 'text-slate-600 hover:text-slate-900'
                       }`}
                     >
-                      Samagra ID
+                      {t('Samagra ID', 'समग्र आईडी', 'समग्र नंबर')}
                     </button>
                     <button
                       type="button"
@@ -1145,7 +1206,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                           : 'text-slate-600 hover:text-slate-900'
                       }`}
                     >
-                      Email Form
+                      {t('Email Form', 'ईमेल फॉर्म', 'ईमेल फॉर्म')}
                     </button>
                   </div>
                 </div>
@@ -1155,10 +1216,16 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                   <div className="space-y-5 py-2">
                     <div className="space-y-1.5">
                       <h2 className="text-lg font-bold text-slate-900 font-heading">
-                        {authMode === 'signup' ? 'Register Instantly with Google' : 'Sign In with Google'}
+                        {authMode === 'signup'
+                          ? t('Register Instantly with Google', 'Google से तुरंत पंजीकरण करें', 'Google सूं तुरंत खाता बनावो')
+                          : t('Sign In with Google', 'Google से लॉगिन करें', 'Google सूं लॉगिन करो')}
                       </h2>
                       <p className="text-xs text-slate-500 leading-relaxed">
-                        Recommended for citizens of Indore. Automatically creates or restores your verified Firestore profile, bookmarked schemes, and submitted applications.
+                        {t(
+                          'Recommended for citizens of Indore. Automatically creates or restores your verified profile, bookmarked schemes, and submitted applications.',
+                          'इंदौर के नागरिकों के लिए सरल विकल्प। आपकी प्रोफाइल, सहेजी गई योजनाएं और आवेदन स्वतः सहेजे जाते हैं।',
+                          'इंदौर रा लोग खातर सबसे आसान तरीको। तमारी प्रोफाइल, सहेज्योड़ी योजना अने अर्जी अपने-आप सुरक्षित रहे छे।'
+                        )}
                       </p>
                     </div>
 
@@ -1190,12 +1257,14 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                           />
                         </svg>
                       )}
-                      <span>Continue with Google Account</span>
+                      <span>{t('Continue with Google Account', 'Google खाते से जारी रखें', 'Google खाता सूं आगे बढ़ो')}</span>
                     </button>
 
                     <div className="relative flex py-2 items-center">
                       <div className="flex-grow border-t border-slate-200"></div>
-                      <span className="shrink mx-3 text-xs text-slate-400">or use Citizen options</span>
+                      <span className="shrink mx-3 text-xs text-slate-400">
+                        {t('or use Citizen options', 'या अन्य विकल्प चुनें', 'या दूजो तरीको चुनो')}
+                      </span>
                       <div className="flex-grow border-t border-slate-200"></div>
                     </div>
 
@@ -1206,7 +1275,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                         className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-950 text-xs font-bold transition cursor-pointer"
                       >
                         <KeyRound className="w-4 h-4 text-amber-700" />
-                        <span>Login with Samagra ID</span>
+                        <span>{t('Login with Samagra ID', 'समग्र आईडी से लॉगिन', 'समग्र नंबर सूं लॉगिन')}</span>
                       </button>
                       <button
                         type="button"
@@ -1217,7 +1286,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                         className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold transition cursor-pointer"
                       >
                         <UserPlus className="w-4 h-4 text-slate-700" />
-                        <span>New Citizen Registration</span>
+                        <span>{t('New Citizen Registration', 'नया नागरिक पंजीकरण', 'नयो नागरिक खाता बनावो')}</span>
                       </button>
                     </div>
                   </div>
@@ -1228,10 +1297,14 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                   <div className="space-y-5">
                     <div className="space-y-1">
                       <h2 className="text-lg font-bold text-slate-900 font-heading">
-                        Samagra Family / Member ID Login
+                        {t('Samagra Family / Member ID Login', 'समग्र परिवार / सदस्य आईडी लॉगिन', 'समग्र कुटुंब / सदस्य नंबर सूं लॉगिन')}
                       </h2>
                       <p className="text-xs text-slate-500">
-                        Enter your 8-digit Samagra Family ID or 9-digit Member ID to load your verified household profile & Aadhaar eKYC status.
+                        {t(
+                          'Enter your 8-digit Samagra Family ID or 9-digit Member ID to load your verified household profile & Aadhaar eKYC status.',
+                          'अपना परिवार प्रोफाइल व आधार eKYC स्थिति लोड करने के लिए 8-अंकीय समग्र परिवार आईडी या 9-अंकीय सदस्य आईडी दर्ज करें।',
+                          'अपणो कुटुंब प्रोफाइल अने आधार eKYC देखण खातर 8 अंक रो समग्र कुटुंब नंबर या 9 अंक रो सदस्य नंबर लिखो।'
+                        )}
                       </p>
                     </div>
 
@@ -1246,7 +1319,11 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                             handleSamagraSearch();
                           }
                         }}
-                        placeholder="Enter 8-digit Family or 9-digit Member ID"
+                        placeholder={t(
+                          'Enter 8-digit Family or 9-digit Member ID',
+                          '8-अंकीय परिवार या 9-अंकीय सदस्य आईडी दर्ज करें',
+                          '8 अंक रो कुटुंब या 9 अंक रो सदस्य नंबर लिखो'
+                        )}
                         className="flex-1 px-4 py-2.5 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono tabular-nums"
                       />
                       <button
@@ -1256,14 +1333,16 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                         className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold inline-flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap"
                       >
                         {samagraLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-                        <span>Verify ID</span>
+                        <span>{t('Verify ID', 'आईडी जांचें', 'नंबर जांचो')}</span>
                       </button>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2 text-xs">
                       {liveSamagraList.length > 0 ? (
                         <>
-                          <span className="text-slate-500">Your Linked Households:</span>
+                          <span className="text-slate-500">
+                            {t('Your Linked Households:', 'आपके जुड़े परिवार:', 'तमारा जुड़योड़ा कुटुंब:')}
+                          </span>
                           {liveSamagraList.slice(0, 5).map(fam => (
                             <button
                               key={fam.familyId}
@@ -1280,13 +1359,19 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                         </>
                       ) : (
                         <div className="w-full flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
-                          <span className="text-slate-600">Enter your 8-digit Samagra Family ID or register a new household.</span>
+                          <span className="text-slate-600">
+                            {t(
+                              'Enter your 8-digit Samagra Family ID or register a new household.',
+                              '8-अंकीय समग्र परिवार आईडी दर्ज करें या नया परिवार पंजीकृत करें।',
+                              '8 अंक रो समग्र कुटुंब नंबर लिखो या नयो कुटुंब दर्ज करो।'
+                            )}
+                          </span>
                           <button
                             type="button"
                             onClick={() => onNavigateTab('samagra')}
                             className="text-amber-700 hover:text-amber-900 font-bold underline cursor-pointer whitespace-nowrap"
                           >
-                            Register Samagra ID →
+                            {t('Register Samagra ID →', 'समग्र पंजीयन करें →', 'समग्र दर्ज करो →')}
                           </button>
                         </div>
                       )}
@@ -1311,7 +1396,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                               rel="noopener noreferrer"
                               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-amber-300 text-amber-900 font-bold hover:bg-amber-100 transition"
                             >
-                              <span>Verify directly at samagra.gov.in</span>
+                              <span>{t('Verify directly at samagra.gov.in', 'samagra.gov.in पर जांचें', 'samagra.gov.in पर जांचो')}</span>
                               <ExternalLink className="w-3.5 h-3.5" />
                             </a>
                             <button
@@ -1319,7 +1404,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                               onClick={() => onNavigateTab('samagra')}
                               className="inline-flex items-center gap-1 text-amber-900 font-bold underline hover:text-amber-700 cursor-pointer"
                             >
-                              <span>Register / Enter Details Manually →</span>
+                              <span>{t('Register / Enter Details Manually →', 'मैन्युअल रूप से विवरण दर्ज करें →', 'खुद जानकारी भरो →')}</span>
                             </button>
                           </div>
                         )}
@@ -1337,7 +1422,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                         <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs">
                           <div>
                             <span className="font-bold text-slate-900">
-                              Family Head: {samagraFamilyResult.headName}
+                              {t('Family Head:', 'मुखिया:', 'मुखिया:')} {samagraFamilyResult.headName}
                             </span>
                             <span className="text-slate-500 ml-2">
                               ({samagraFamilyResult.wardOrBlock} · {samagraFamilyResult.rationCardType})
@@ -1357,16 +1442,18 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                                 <div className="text-sm font-bold text-slate-900 truncate">
                                   {member.name}{' '}
                                   <span className="text-xs font-normal text-slate-500">
-                                    ({member.relation}, {member.age} yrs)
+                                    ({member.relation}, {member.age} {t('yrs', 'वर्ष', 'बरस')})
                                   </span>
                                 </div>
                                 <div className="text-xs text-slate-500 flex items-center gap-2 mt-0.5 font-mono tabular-nums">
-                                  <span>Member: {member.memberId}</span>
+                                  <span>{t('Member:', 'सदस्य:', 'सदस्य:')} {member.memberId}</span>
                                   <span>·</span>
-                                  <span>{member.occupation}</span>
+                                  <span>{getOccupationLabel(member.occupation, currentLanguage)}</span>
                                   <span>·</span>
                                   <span className={member.ekycStatus ? 'text-emerald-700 font-semibold' : 'text-amber-700'}>
-                                    {member.ekycStatus ? 'eKYC Verified' : 'eKYC Pending'}
+                                    {member.ekycStatus
+                                      ? t('eKYC Verified', 'eKYC सत्यापित', 'eKYC पक्को')
+                                      : t('eKYC Pending', 'eKYC लंबित', 'eKYC बाकी')}
                                   </span>
                                 </div>
                               </div>
@@ -1376,7 +1463,11 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                                 onClick={() => handleSamagraMemberLogin(member, samagraFamilyResult)}
                                 className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 disabled:opacity-60 text-slate-950 text-xs font-bold inline-flex items-center gap-1 transition whitespace-nowrap cursor-pointer shrink-0"
                               >
-                                {isSubmitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <span>Login</span>}
+                                {isSubmitting ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                  <span>{t('Login', 'लॉगिन', 'लॉगिन')}</span>
+                                )}
                                 {!isSubmitting && <ArrowRight className="w-3.5 h-3.5" />}
                               </button>
                             </div>
@@ -1392,12 +1483,22 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                   <form onSubmit={handleEmailAuthSubmit} className="space-y-4">
                     <div className="space-y-1">
                       <h2 className="text-lg font-bold text-slate-900 font-heading">
-                        {authMode === 'login' ? 'Citizen Portal Sign In' : 'New Citizen Registration'}
+                        {authMode === 'login'
+                          ? t('Citizen Portal Sign In', 'नागरिक पोर्टल लॉगिन', 'नागरिक खाता लॉगिन')
+                          : t('New Citizen Registration', 'नया नागरिक पंजीकरण', 'नयो नागरिक खाता बनावो')}
                       </h2>
                       <p className="text-xs text-slate-500">
                         {authMode === 'login'
-                          ? 'Sign in with your registered email and password to load your Citizen Dashboard profile.'
-                          : 'Create your YojanaSetu citizen account with your Samagra ID and Indore ward/block details.'}
+                          ? t(
+                              'Sign in with your registered email and password to load your Citizen Dashboard profile.',
+                              'अपनी प्रोफाइल खोलने के लिए पंजीकृत ईमेल और पासवर्ड दर्ज करें।',
+                              'अपणो खातो खोलण खातर ईमेल अने पासवर्ड लिखो।'
+                            )
+                          : t(
+                              'Create your YojanaSetu citizen account with your Samagra ID and Indore ward/block details.',
+                              'अपनी समग्र आईडी और इंदौर वार्ड/ब्लॉक विवरण के साथ नया नागरिक खाता बनाएं।',
+                              'अपणो समग्र नंबर अने इंदौर वार्ड/ब्लॉक री जानकारी सूं नयो खातो बनावो।'
+                            )}
                       </p>
                     </div>
 
@@ -1405,14 +1506,18 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                       <div className="space-y-3.5">
                         <div>
                           <label className="block text-xs font-semibold text-slate-700 mb-1">
-                            Full Name *
+                            {t('Full Name *', 'पूरा नाम *', 'पूरो नाम *')}
                           </label>
                           <input
                             type="text"
                             value={fullName}
                             onChange={e => setFullName(e.target.value)}
                             required
-                            placeholder="Enter full name as per Samagra"
+                            placeholder={t(
+                              'Enter full name as per Samagra',
+                              'समग्र के अनुसार पूरा नाम लिखें',
+                              'समग्र रा हिसाब सूं पूरो नाम लिखो'
+                            )}
                             maxLength={120}
                             className="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500"
                           />
@@ -1428,6 +1533,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                             setMobileVerificationToken(verificationToken);
                           }}
                           disabled={isSubmitting}
+                          currentLanguage={currentLanguage}
                           onNotify={onNotify}
                         />
                       </div>
@@ -1436,7 +1542,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                       <div className={authMode === 'login' ? 'sm:col-span-2' : ''}>
                         <label className="block text-xs font-semibold text-slate-700 mb-1">
-                          Email Address *
+                          {t('Email Address *', 'ईमेल पता *', 'ईमेल पतो *')}
                         </label>
                         <div className="relative">
                           <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
@@ -1455,13 +1561,13 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                       {authMode === 'signup' && (
                         <div>
                           <label className="block text-xs font-semibold text-slate-700 mb-1">
-                            Samagra Family ID (Optional)
+                            {t('Samagra Family ID (Optional)', 'समग्र परिवार आईडी (वैकल्पिक)', 'समग्र कुटुंब नंबर (चाहो तो)')}
                           </label>
                           <input
                             type="text"
                             value={samagraFamilyId}
                             onChange={e => setSamagraFamilyId(e.target.value)}
-                            placeholder="8-digit Family ID (optional)"
+                            placeholder={t('8-digit Family ID (optional)', '8-अंकीय परिवार आईडी', '8 अंक रो कुटुंब नंबर')}
                             maxLength={16}
                             className="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono tabular-nums"
                           />
@@ -1472,7 +1578,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                       <div className={authMode === 'login' ? 'sm:col-span-2' : ''}>
                         <label className="block text-xs font-semibold text-slate-700 mb-1">
-                          Password *
+                          {t('Password *', 'पासवर्ड *', 'पासवर्ड *')}
                         </label>
                         <div className="relative">
                           <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
@@ -1481,7 +1587,11 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                             value={password}
                             onChange={e => setPassword(e.target.value)}
                             required
-                            placeholder={authMode === 'signup' ? 'Minimum 6 characters' : 'Enter your password'}
+                            placeholder={
+                              authMode === 'signup'
+                                ? t('Minimum 6 characters', 'कम से कम 6 अक्षर', 'कम सूं कम 6 अक्षर')
+                                : t('Enter your password', 'अपना पासवर्ड लिखें', 'अपणो पासवर्ड लिखो')
+                            }
                             className="w-full pl-9 pr-10 py-2 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500"
                           />
                           <button
@@ -1498,14 +1608,14 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                       {authMode === 'signup' && (
                         <div>
                           <label className="block text-xs font-semibold text-slate-700 mb-1">
-                            Confirm Password *
+                            {t('Confirm Password *', 'पासवर्ड पुष्टि *', 'पासवर्ड फेर लिखो *')}
                           </label>
                           <input
                             type={showPassword ? 'text' : 'password'}
                             value={confirmPassword}
                             onChange={e => setConfirmPassword(e.target.value)}
                             required
-                            placeholder="Re-enter password"
+                            placeholder={t('Re-enter password', 'पासवर्ड दोबारा लिखें', 'पासवर्ड फेर लिखो')}
                             className="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500"
                           />
                         </div>
@@ -1515,25 +1625,33 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                     {authMode === 'signup' && (
                       <div className="border-t border-slate-100 pt-4 space-y-3.5">
                         <p className="text-xs font-bold text-slate-700">
-                          Indore Jurisdiction & Eligibility Profile
+                          {t(
+                            'Indore Jurisdiction & Eligibility Profile',
+                            'इंदौर क्षेत्राधिकार एवं पात्रता विवरण',
+                            'इंदौर इलाको अने पात्रता जानकारी'
+                          )}
                         </p>
 
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                           <div>
-                            <label className="block text-xs font-medium text-slate-600 mb-1">Area Type</label>
+                            <label className="block text-xs font-medium text-slate-600 mb-1">
+                              {t('Area Type', 'क्षेत्र प्रकार', 'शहर / गाँव')}
+                            </label>
                             <select
                               value={areaType}
                               onChange={e => setAreaType(e.target.value as AreaType)}
                               className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white"
                             >
-                              <option value="urban">Urban (IMC)</option>
-                              <option value="rural">Rural (Janpad)</option>
+                              <option value="urban">{t('Urban (IMC)', 'शहरी (नगर निगम)', 'शहर (नगर निगम)')}</option>
+                              <option value="rural">{t('Rural (Janpad)', 'ग्रामीण (जनपद)', 'गाँव (जनपद)')}</option>
                             </select>
                           </div>
 
                           {areaType === 'urban' ? (
                             <div>
-                              <label className="block text-xs font-medium text-slate-600 mb-1">IMC Ward (1–85)</label>
+                              <label className="block text-xs font-medium text-slate-600 mb-1">
+                                {t('IMC Ward (1–85)', 'निगम वार्ड (1–85)', 'निगम वार्ड (1–85)')}
+                              </label>
                               <input
                                 type="number"
                                 min={1}
@@ -1545,7 +1663,9 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                             </div>
                           ) : (
                             <div>
-                              <label className="block text-xs font-medium text-slate-600 mb-1">Janpad Block</label>
+                              <label className="block text-xs font-medium text-slate-600 mb-1">
+                                {t('Janpad Block', 'जनपद ब्लॉक', 'जनपद ब्लॉक')}
+                              </label>
                               <select
                                 value={blockName}
                                 onChange={e => setBlockName(e.target.value as JanpadBlock)}
@@ -1562,20 +1682,22 @@ export const AuthPage: React.FC<AuthPageProps> = ({
 
                           <div>
                             <label className="block text-xs font-medium text-slate-600 mb-1">
-                              Member ID (9-Digit)
+                              {t('Member ID (9-Digit)', 'सदस्य आईडी (9 अंक)', 'सदस्य नंबर (9 अंक)')}
                             </label>
                             <input
                               type="text"
                               value={samagraMemberId}
                               onChange={e => setSamagraMemberId(e.target.value)}
-                              placeholder="Optional"
+                              placeholder={t('Optional', 'वैकल्पिक', 'चाहो तो')}
                               maxLength={16}
                               className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl font-mono tabular-nums"
                             />
                           </div>
 
                           <div>
-                            <label className="block text-xs font-medium text-slate-600 mb-1">Age</label>
+                            <label className="block text-xs font-medium text-slate-600 mb-1">
+                              {t('Age', 'आयु', 'उमर')}
+                            </label>
                             <input
                               type="number"
                               min={0}
@@ -1587,20 +1709,24 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                           </div>
 
                           <div>
-                            <label className="block text-xs font-medium text-slate-600 mb-1">Gender</label>
+                            <label className="block text-xs font-medium text-slate-600 mb-1">
+                              {t('Gender', 'लिंग', 'लिंग')}
+                            </label>
                             <select
                               value={gender}
                               onChange={e => setGender(e.target.value as Gender)}
                               className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white"
                             >
-                              <option value="female">Female</option>
-                              <option value="male">Male</option>
-                              <option value="transgender">Transgender</option>
+                              <option value="female">{getGenderLabel('female', currentLanguage)}</option>
+                              <option value="male">{getGenderLabel('male', currentLanguage)}</option>
+                              <option value="transgender">{getGenderLabel('transgender', currentLanguage)}</option>
                             </select>
                           </div>
 
                           <div>
-                            <label className="block text-xs font-medium text-slate-600 mb-1">Category</label>
+                            <label className="block text-xs font-medium text-slate-600 mb-1">
+                              {t('Category', 'वर्ग', 'वर्ग')}
+                            </label>
                             <select
                               value={category}
                               onChange={e => setCategory(e.target.value as Category)}
@@ -1608,22 +1734,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                             >
                               {CATEGORIES.map(c => (
                                 <option key={c} value={c}>
-                                  {c}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-
-                          <div>
-                            <label className="block text-xs font-medium text-slate-600 mb-1">Occupation</label>
-                            <select
-                              value={occupation}
-                              onChange={e => setOccupation(e.target.value as OccupationType)}
-                              className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white"
-                            >
-                              {OCCUPATIONS.map(o => (
-                                <option key={o} value={o}>
-                                  {o}
+                                  {getCategoryLabel(c, currentLanguage)}
                                 </option>
                               ))}
                             </select>
@@ -1631,7 +1742,24 @@ export const AuthPage: React.FC<AuthPageProps> = ({
 
                           <div>
                             <label className="block text-xs font-medium text-slate-600 mb-1">
-                              Annual Income (₹)
+                              {t('Occupation', 'व्यवसाय', 'काम-धंधो')}
+                            </label>
+                            <select
+                              value={occupation}
+                              onChange={e => setOccupation(e.target.value as OccupationType)}
+                              className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white"
+                            >
+                              {OCCUPATIONS.map(o => (
+                                <option key={o} value={o}>
+                                  {getOccupationLabel(o, currentLanguage)}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="block text-xs font-medium text-slate-600 mb-1">
+                              {t('Annual Income (₹)', 'वार्षिक आय (₹)', 'सालाना कमाई (₹)')}
                             </label>
                             <input
                               type="number"
@@ -1644,7 +1772,9 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                           </div>
 
                           <div>
-                            <label className="block text-xs font-medium text-slate-600 mb-1">Marital Status</label>
+                            <label className="block text-xs font-medium text-slate-600 mb-1">
+                              {t('Marital Status', 'वैवाहिक स्थिति', 'ब्याह स्थिति')}
+                            </label>
                             <select
                               value={maritalStatus}
                               onChange={e => setMaritalStatus(e.target.value as MaritalStatus)}
@@ -1652,7 +1782,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                             >
                               {MARITAL_STATUSES.map(m => (
                                 <option key={m} value={m}>
-                                  {m}
+                                  {getMaritalLabel(m, currentLanguage)}
                                 </option>
                               ))}
                             </select>
@@ -1667,7 +1797,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                               onChange={e => setIsBPL(e.target.checked)}
                               className="rounded border-slate-300 text-amber-600"
                             />
-                            <span>BPL Card</span>
+                            <span>{t('BPL Card', 'बीपीएल कार्ड', 'बीपीएल कार्ड')}</span>
                           </label>
                           <label className="inline-flex items-center gap-1.5 cursor-pointer">
                             <input
@@ -1676,7 +1806,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                               onChange={e => setHasDisability(e.target.checked)}
                               className="rounded border-slate-300 text-amber-600"
                             />
-                            <span>Divyang (40%+)</span>
+                            <span>{t('Divyang (40%+)', 'दिव्यांग (40%+)', 'दिव्यांग (40%+)')}</span>
                           </label>
                           <label className="inline-flex items-center gap-1.5 cursor-pointer">
                             <input
@@ -1685,7 +1815,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                               onChange={e => setIsMpDomicile(e.target.checked)}
                               className="rounded border-slate-300 text-amber-600"
                             />
-                            <span>MP Domicile</span>
+                            <span>{t('MP Domicile', 'म.प्र. मूल निवासी', 'म.प्र. मूल निवासी')}</span>
                           </label>
                           <label className="inline-flex items-center gap-1.5 cursor-pointer">
                             <input
@@ -1694,7 +1824,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                               onChange={e => setIsIndoreResident(e.target.checked)}
                               className="rounded border-slate-300 text-amber-600"
                             />
-                            <span>Indore Resident</span>
+                            <span>{t('Indore Resident', 'इंदौर निवासी', 'इंदौर निवासी')}</span>
                           </label>
                         </div>
                       </div>
@@ -1703,11 +1833,11 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                     <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
                       {authMode === 'login' ? (
                         <span className="text-xs text-slate-500">
-                          Authenticated Citizen Portal Session
+                          {t('Authenticated Citizen Portal Session', 'सुरक्षित नागरिक पोर्टल लॉगिन', 'सुरक्षित नागरिक लॉगिन')}
                         </span>
                       ) : (
                         <span className="text-xs text-slate-500">
-                          Saved securely in YojanaSetu Citizen Database
+                          {t('Saved securely in YojanaSetu Citizen Database', 'योजनासेतु डेटाबेस में सुरक्षित', 'योजनासेतु खाता मां सुरक्षित')}
                         </span>
                       )}
 
@@ -1722,7 +1852,9 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                           <UserCheck className="w-4 h-4" />
                         )}
                         <span>
-                          {authMode === 'login' ? 'Sign In to Citizen Account' : 'Create Citizen Account'}
+                          {authMode === 'login'
+                            ? t('Sign In to Citizen Account', 'नागरिक खाते में लॉगिन करें', 'अपणा खाता मां लॉगिन करो')
+                            : t('Create Citizen Account', 'नागरिक खाता बनाएं', 'नयो नागरिक खातो बनावो')}
                         </span>
                       </button>
                     </div>

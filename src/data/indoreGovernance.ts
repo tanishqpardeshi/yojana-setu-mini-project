@@ -161,10 +161,10 @@ export const STANDARD_DOCUMENTS: DocumentInfo[] = [
 ];
 
 export const GOVERNANCE_LEVEL_NAMES = {
-  international: { en: 'Level 1: International & Multilateral', hi: 'स्तर 1: अंतर्राष्ट्रीय व बहुपक्षीय', color: 'indigo' },
-  national: { en: 'Level 2: National (Central Govt)', hi: 'स्तर 2: राष्ट्रीय (केंद्र सरकार)', color: 'blue' },
-  state_mp: { en: 'Level 3: Madhya Pradesh State', hi: 'स्तर 3: मध्य प्रदेश राज्य शासन', color: 'emerald' },
-  district_indore: { en: 'Level 4: Indore Collectorate', hi: 'स्तर 4: इंदौर कलेक्ट्रेट (जिला प्रशासन)', color: 'amber' },
-  urban_imc: { en: 'Level 5: IMC Urban Wards (1-85)', hi: 'स्तर 5: इंदौर नगर निगम वार्ड 1-85', color: 'teal' },
-  rural_janpad: { en: 'Level 6: Rural Janpad Panchayats', hi: 'स्तर 6: ग्रामीण जनपद पंचायतें', color: 'rose' },
+  international: { en: 'Level 1: International & Multilateral', hi: 'स्तर 1: अंतर्राष्ट्रीय व बहुपक्षीय', malwi: 'स्तर 1: अंतर्राष्ट्रीय व बड़ी मदद', color: 'indigo' },
+  national: { en: 'Level 2: National (Central Govt)', hi: 'स्तर 2: राष्ट्रीय (केंद्र सरकार)', malwi: 'स्तर 2: केंद्र सरकार री योजना', color: 'blue' },
+  state_mp: { en: 'Level 3: Madhya Pradesh State', hi: 'स्तर 3: मध्य प्रदेश राज्य शासन', malwi: 'स्तर 3: म.प्र. सरकार री योजना', color: 'emerald' },
+  district_indore: { en: 'Level 4: Indore Collectorate', hi: 'स्तर 4: इंदौर कलेक्ट्रेट (जिला प्रशासन)', malwi: 'स्तर 4: इंदौर कलेक्टर दफ्तर', color: 'amber' },
+  urban_imc: { en: 'Level 5: IMC Urban Wards (1-85)', hi: 'स्तर 5: इंदौर नगर निगम वार्ड 1-85', malwi: 'स्तर 5: इंदौर नगर निगम (वार्ड 1-85)', color: 'teal' },
+  rural_janpad: { en: 'Level 6: Rural Janpad Panchayats', hi: 'स्तर 6: ग्रामीण जनपद पंचायतें', malwi: 'स्तर 6: गाँव री 4 जनपद पंचायत', color: 'rose' },
 };
