@@ -1,4 +1,4 @@
-# YojanaSetu (योजनासेतु) - Indore District Civic Discovery Platform
+# YojanaSetu (योजनासेतु) - Indore District Discovery Platform
 
 > **Real-Time, Centralized Government Scheme Discovery & Verification Engine for the Citizens of Indore District, Madhya Pradesh.**
 
