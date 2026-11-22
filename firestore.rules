@@ -1,0 +1,203 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net: deny everything by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Strict RBAC: verifies authenticated admin claims, trusted /admins/{uid} registry,
+    // or verified owner email (always requiring email_verified == true to prevent spoofing).
+    function isAdmin() {
+      return isEmailVerified() && (
+        request.auth.token.role == 'admin' ||
+        request.auth.token.admin == true ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        request.auth.token.email == 'tanishqpardeshi9the12102@gmail.com'
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['uid', 'email', 'displayName', 'role', 'createdAt'])
+        && data.keys().hasOnly([
+          'uid', 'email', 'displayName', 'photoURL', 'phone', 'role', 'authMethod',
+          'samagraId', 'samagraFamilyId', 'samagraMemberId', 'areaType', 'wardNumber',
+          'blockName', 'category', 'age', 'gender', 'annualIncome', 'occupation',
+          'isBPL', 'hasDisability', 'maritalStatus', 'isMpDomicile', 'isIndoreResident',
+          'ekycVerified', 'createdAt', 'updatedAt', 'lastLoginAt'
+        ])
+        && data.uid is string && data.uid.size() > 0 && data.uid.size() <= 128
+        && data.email is string && data.email.size() <= 160
+        && data.displayName is string && data.displayName.size() > 0 && data.displayName.size() <= 120
+        && data.role in ['citizen', 'admin']
+        && data.createdAt is string && data.createdAt.size() <= 40
+        && (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 500))
+        && (!('phone' in data) || (data.phone is string && data.phone.size() <= 20))
+        && (!('authMethod' in data) || data.authMethod in ['google', 'email', 'samagra'])
+        && (!('samagraId' in data) || (data.samagraId is string && data.samagraId.size() <= 16))
+        && (!('samagraFamilyId' in data) || (data.samagraFamilyId is string && data.samagraFamilyId.size() <= 16))
+        && (!('samagraMemberId' in data) || (data.samagraMemberId is string && data.samagraMemberId.size() <= 16))
+        && (!('areaType' in data) || data.areaType in ['urban', 'rural'])
+        && (!('wardNumber' in data) || (data.wardNumber is number && data.wardNumber >= 1 && data.wardNumber <= 85))
+        && (!('blockName' in data) || (data.blockName is string && data.blockName.size() <= 40))
+        && (!('category' in data) || data.category in ['SC', 'ST', 'OBC', 'GEN', 'EWS'])
+        && (!('age' in data) || (data.age is number && data.age >= 0 && data.age <= 120))
+        && (!('gender' in data) || data.gender in ['female', 'male', 'transgender', 'any'])
+        && (!('annualIncome' in data) || (data.annualIncome is number && data.annualIncome >= 0 && data.annualIncome <= 100000000))
+        && (!('occupation' in data) || (data.occupation is string && data.occupation.size() <= 60))
+        && (!('isBPL' in data) || data.isBPL is bool)
+        && (!('hasDisability' in data) || data.hasDisability is bool)
+        && (!('maritalStatus' in data) || (data.maritalStatus is string && data.maritalStatus.size() <= 20))
+        && (!('isMpDomicile' in data) || data.isMpDomicile is bool)
+        && (!('isIndoreResident' in data) || data.isIndoreResident is bool)
+        && (!('ekycVerified' in data) || data.ekycVerified is bool)
+        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 40))
+        && (!('lastLoginAt' in data) || (data.lastLoginAt is string && data.lastLoginAt.size() <= 40));
+    }
+
+    function isValidSavedScheme(data) {
+      return data.keys().hasAll(['schemeId', 'savedAt'])
+        && data.keys().hasOnly(['schemeId', 'schemeTitle', 'savedAt'])
+        && data.schemeId is string && data.schemeId.size() > 0 && data.schemeId.size() <= 64
+        && data.savedAt is string && data.savedAt.size() <= 40
+        && (!('schemeTitle' in data) || (data.schemeTitle is string && data.schemeTitle.size() <= 200));
+    }
+
+    function isValidApplication(data) {
+      return data.keys().hasAll(['arn', 'schemeId', 'applicantName', 'applicantUid', 'status', 'appliedAt'])
+        && data.keys().hasOnly([
+          'arn', 'schemeId', 'schemeName', 'applicantName', 'applicantUid',
+          'aadhaarLast4', 'samagraId', 'wardNumber', 'status', 'appliedAt', 'amountEstimated'
+        ])
+        && data.arn is string && data.arn.size() > 0 && data.arn.size() <= 64
+        && data.schemeId is string && data.schemeId.size() > 0 && data.schemeId.size() <= 64
+        && data.applicantName is string && data.applicantName.size() > 0 && data.applicantName.size() <= 120
+        && data.applicantUid is string && data.applicantUid.size() > 0 && data.applicantUid.size() <= 128
+        && data.status in ['Submitted', 'Under_Verification', 'Field_Inspection', 'Approved', 'Disbursed', 'Rejected']
+        && data.appliedAt is string && data.appliedAt.size() <= 40
+        && (!('schemeName' in data) || (data.schemeName is string && data.schemeName.size() <= 200))
+        && (!('aadhaarLast4' in data) || (data.aadhaarLast4 is string && data.aadhaarLast4.size() <= 4))
+        && (!('samagraId' in data) || (data.samagraId is string && data.samagraId.size() <= 16))
+        && (!('wardNumber' in data) || (data.wardNumber is number && data.wardNumber >= 1 && data.wardNumber <= 85))
+        && (!('amountEstimated' in data) || (data.amountEstimated is number && data.amountEstimated >= 0 && data.amountEstimated <= 100000000));
+    }
+
+    function isValidAnnouncement(data) {
+      return data.keys().hasAll(['title', 'message', 'priority', 'createdAt'])
+        && data.keys().hasOnly(['title', 'message', 'priority', 'createdAt'])
+        && data.title is string && data.title.size() > 0 && data.title.size() <= 200
+        && data.message is string && data.message.size() > 0 && data.message.size() <= 1000
+        && data.priority in ['Normal', 'Urgent', 'Flash']
+        && data.createdAt is string && data.createdAt.size() <= 40;
+    }
+
+    // Trusted Admin Registry: zero public writes, no listing; a user may check only their own record.
+    match /admins/{adminId} {
+      allow get: if isSignedIn() && isValidId(adminId) && (isOwner(adminId) || isAdmin());
+      allow list: if false;
+      allow create, update, delete: if false;
+    }
+
+    // Citizen & Admin user profiles: strict PII isolation and anti-privilege-escalation
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if false;
+      allow create: if isSignedIn()
+        && isValidId(userId)
+        && isValidUserProfile(incoming())
+        && isOwner(userId)
+        && incoming().uid == userId
+        && (incoming().role == 'citizen' || isAdmin());
+      allow update: if isSignedIn()
+        && isValidId(userId)
+        && isValidUserProfile(incoming())
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && (
+          (isOwner(userId)
+            && incoming().role == existing().role
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'displayName', 'photoURL', 'phone', 'authMethod', 'samagraId',
+              'samagraFamilyId', 'samagraMemberId', 'areaType', 'wardNumber',
+              'blockName', 'category', 'age', 'gender', 'annualIncome',
+              'occupation', 'isBPL', 'hasDisability', 'maritalStatus',
+              'isMpDomicile', 'isIndoreResident', 'ekycVerified',
+              'updatedAt', 'lastLoginAt'
+            ]))
+          || isAdmin()
+        );
+      allow delete: if false;
+
+      match /savedSchemes/{schemeId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(schemeId);
+        allow list: if isOwner(userId) && isValidId(userId);
+        allow create, update: if isOwner(userId) && isValidId(userId) && isValidId(schemeId) && isValidSavedScheme(incoming());
+        allow delete: if isOwner(userId) && isValidId(userId) && isValidId(schemeId);
+      }
+    }
+
+    // Citizen Applications: strict owner isolation, initial 'Submitted' enforcement, admin-only status transitions
+    match /applications/{applicationId} {
+      allow get: if isSignedIn() && isValidId(applicationId) && (existing().applicantUid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && resource.data.applicantUid == request.auth.uid;
+      allow create: if isSignedIn()
+        && isValidId(applicationId)
+        && isValidApplication(incoming())
+        && incoming().applicantUid == request.auth.uid
+        && incoming().status == 'Submitted';
+      allow update: if isSignedIn()
+        && isValidId(applicationId)
+        && isValidApplication(incoming())
+        && incoming().applicantUid == existing().applicantUid
+        && incoming().arn == existing().arn
+        && incoming().appliedAt == existing().appliedAt
+        && (
+          (existing().applicantUid == request.auth.uid
+            && !(existing().status in ['Disbursed', 'Rejected'])
+            && incoming().status == existing().status
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'schemeName', 'applicantName', 'aadhaarLast4', 'samagraId', 'wardNumber', 'amountEstimated'
+            ]))
+          || isAdmin()
+        );
+      allow delete: if false;
+    }
+
+    // District Announcements: authenticated read, strictly admin-only write
+    match /announcements/{announcementId} {
+      allow get: if isSignedIn() && isValidId(announcementId);
+      allow list: if isSignedIn();
+      allow create, update: if isAdmin() && isValidId(announcementId) && isValidAnnouncement(incoming());
+      allow delete: if isAdmin() && isValidId(announcementId);
+    }
+
+    match /test/{docId} {
+      allow get: if true;
+    }
+  }
+}
