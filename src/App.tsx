@@ -261,11 +261,22 @@ export default function App() {
   }, []);
 
   const activeTab = useMemo(() => mapPathnameToCitizenTab(pathname), [pathname]);
+  const [authInitialMode, setAuthInitialMode] = useState<'login' | 'signup'>('login');
 
   const handleSelectCitizenTab = useCallback(
     (tab: string) => {
       setCitizenSecurityBanner(null);
       navigateTo(mapCitizenTabToPathname(tab));
+    },
+    [navigateTo]
+  );
+
+  const handleOpenAuthMode = useCallback(
+    (mode: 'login' | 'signup') => {
+      setAuthInitialMode(mode);
+      setCitizenSecurityBanner(null);
+      navigateTo(mapCitizenTabToPathname('auth'));
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     },
     [navigateTo]
   );
@@ -579,6 +590,10 @@ export default function App() {
             writeCitizenToken(null);
             setCitizenAuthToken(null);
             setCitizenAccountUser(null);
+            if (!auth.currentUser) {
+              writePortalScope(null);
+              setPortalScope(null);
+            }
           }
         })
         .catch(() => {});
@@ -803,11 +818,35 @@ export default function App() {
     setCitizenProfile(prev => mapUserProfileToCitizenProfile(citizenDoc, prev));
     setAuthBannerMessage(null);
     setCitizenSecurityBanner(null);
+    showToast({
+      type: 'success',
+      title: result.isNewUser
+        ? pickText(currentLanguage, {
+            en: 'Citizen Account Created',
+            hi: 'नागरिक खाता बन गया',
+            malwi: 'नयो नागरिक खातो बण गयो',
+          })
+        : pickText(currentLanguage, {
+            en: 'Welcome Back',
+            hi: 'वापसी पर स्वागत है',
+            malwi: 'पाछो स्वागत छे',
+          }),
+      message: pickText(currentLanguage, {
+        en: `Signed in as ${citizenDoc.displayName || result.user.email}. Your personalized schemes are ready.`,
+        hi: `${citizenDoc.displayName || result.user.email} के रूप में लॉगिन सफल। आपकी पात्र योजनाएं तैयार हैं।`,
+        malwi: `${citizenDoc.displayName || result.user.email} रा नाम सूं लॉगिन पक्को हो गयो।`,
+      }),
+    });
     navigateTo(CITIZEN_DEFAULT_ROUTE);
   };
 
   // Citizen Email/Password Auth Success Handler (PostgreSQL / SQLite backed, Citizen role only)
   const handleCitizenEmailAuthSuccess = (token: string, profile: CitizenAccountProfile) => {
+    if (firebaseUser) {
+      logOutUser().catch(() => {});
+      setFirebaseUser(null);
+      setUserProfileDoc(null);
+    }
     writeCitizenToken(token);
     setCitizenAuthToken(token);
     setCitizenAccountUser(profile);
@@ -830,6 +869,19 @@ export default function App() {
     }
     setAuthBannerMessage(null);
     setCitizenSecurityBanner(null);
+    showToast({
+      type: 'success',
+      title: pickText(currentLanguage, {
+        en: 'Citizen Portal Signed In',
+        hi: 'नागरिक पोर्टल लॉगिन सफल',
+        malwi: 'नागरिक खातो लॉगिन पक्को',
+      }),
+      message: pickText(currentLanguage, {
+        en: `Signed in as ${profile.displayName || profile.email}. Your profile & eligibility criteria are synced.`,
+        hi: `${profile.displayName || profile.email} के रूप में लॉगिन सफल। आपकी प्रोफ़ाइल सिंक हो गई है।`,
+        malwi: `${profile.displayName || profile.email} रा नाम सूं खातो खुल गयो।`,
+      }),
+    });
     navigateTo(CITIZEN_DEFAULT_ROUTE);
   };
 
@@ -885,12 +937,31 @@ export default function App() {
       if (firebaseUser) {
         await logOutUser();
       }
+      try {
+        localStorage.removeItem(ACTIVE_SAMAGRA_STORAGE_KEY);
+      } catch {
+        // ignore storage errors
+      }
       writePortalScope(null);
       setPortalScope(null);
       setUserProfileDoc(null);
       setAdminSession(null);
       setSavedSchemes([]);
+      setCitizenProfile(createEmptyCitizenProfile());
       setAuthBannerMessage(null);
+      showToast({
+        type: 'info',
+        title: pickText(currentLanguage, {
+          en: 'Signed Out',
+          hi: 'लॉग आउट सफल',
+          malwi: 'खातो बंद हो गयो',
+        }),
+        message: pickText(currentLanguage, {
+          en: 'You have securely signed out of your citizen account.',
+          hi: 'आप अपने नागरिक खाते से सुरक्षित रूप से लॉग आउट हो गए हैं।',
+          malwi: 'तम अपणा नागरिक खाता सूं सुरक्षित बाहर निकल गया छो।',
+        }),
+      });
     } catch (err) {
       console.error('Citizen Sign-Out failed:', err);
     }
@@ -1539,6 +1610,7 @@ export default function App() {
         onSignOut={handleCitizenSignOut}
         savedSchemesCount={savedSchemes.length}
         onOpenSavedSchemes={() => setIsSavedSchemesOpen(true)}
+        onOpenAuth={handleOpenAuthMode}
       />
 
       {/* Global Active Profile Filter Bar across the entire webpage */}
@@ -1638,6 +1710,7 @@ export default function App() {
               isProfileFilterApplied={isProfileFilterApplied}
               onClearProfileFilter={handleClearProfileFilter}
               onResetAllCriteria={handleResetAllSearchCriteria}
+              onNotify={showToast}
             />
 
             <div id="eligibility-calculator-section">
@@ -1732,6 +1805,7 @@ export default function App() {
             onNavigateTab={handleSelectCitizenTab}
             onOpenSavedSchemes={() => setIsSavedSchemesOpen(true)}
             savedSchemesCount={savedSchemes.length}
+            initialMode={authInitialMode}
             authBannerMessage={authBannerMessage}
             onNotify={showToast}
           />

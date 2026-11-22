@@ -39,7 +39,7 @@ export const SchemeComparisonModal: React.FC<SchemeComparisonModalProps> = ({
     if (initialSchemeId) {
       return [initialSchemeId, schemes[1]?.id || schemes[0]?.id].filter(Boolean).slice(0, 2) as string[];
     }
-    return ['nat_pm_kisan', 'mp_kisan_kalyan'];
+    return ['pm_kisan', 'mp_kisan_kalyan'];
   });
 
   const comparedSchemes = useMemo(() => {

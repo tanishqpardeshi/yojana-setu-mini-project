@@ -137,7 +137,21 @@ export const AuthPage: React.FC<AuthPageProps> = ({
   onNotify,
 }) => {
   const [authMode, setAuthMode] = useState<'login' | 'signup'>(initialMode);
-  const [authMethod, setAuthMethod] = useState<'google' | 'samagra' | 'email'>('google');
+  const [authMethod, setAuthMethod] = useState<'google' | 'samagra' | 'email'>(
+    initialMode === 'signup' ? 'email' : 'google'
+  );
+  const [errorCode, setErrorCode] = useState<string | null>(null);
+
+  useEffect(() => {
+    setAuthMode(initialMode);
+    if (initialMode === 'signup') {
+      setAuthMethod('email');
+    }
+    setErrorMsg(null);
+    setErrorDetails(null);
+    setErrorCode(null);
+    setSuccessMsg(null);
+  }, [initialMode]);
 
   // Form states for Email Login / Citizen Registration
   const [email, setEmail] = useState('');
@@ -290,24 +304,61 @@ export const AuthPage: React.FC<AuthPageProps> = ({
     if (isSubmitting) return;
     setErrorMsg(null);
     setErrorDetails(null);
+    setErrorCode(null);
     setSuccessMsg(null);
 
-    if (!email.trim() || !password) {
-      setErrorMsg('Please enter both email address and password.');
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail || !password) {
+      setErrorMsg(
+        t(
+          'Please enter both email address and password.',
+          'कृपया ईमेल पता और पासवर्ड दोनों दर्ज करें।',
+          'कृपया ईमेल पतो अने पासवर्ड दोनूं लिखो।'
+        )
+      );
+      return;
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      setErrorMsg(
+        t(
+          'Please enter a valid email address (e.g. name@example.com).',
+          'कृपया मान्य ईमेल पता दर्ज करें (उदा. name@example.com)।',
+          'कृपया सही ईमेल पतो लिखो (ज्यूं name@example.com)।'
+        )
+      );
       return;
     }
 
     if (authMode === 'signup') {
       if (!fullName.trim()) {
-        setErrorMsg('Please enter your full name as per Aadhaar / Samagra.');
+        setErrorMsg(
+          t(
+            'Please enter your full name as per Aadhaar / Samagra.',
+            'कृपया आधार / समग्र के अनुसार अपना पूरा नाम दर्ज करें।',
+            'कृपया आधार / समग्र रा हिसाब सूं पूरो नाम लिखो।'
+          )
+        );
         return;
       }
       if (password.length < 6) {
-        setErrorMsg('Password must be at least 6 characters.');
+        setErrorMsg(
+          t(
+            'Password must be at least 6 characters.',
+            'पासवर्ड कम से कम 6 अक्षरों का होना चाहिए।',
+            'पासवर्ड कम सूं कम 6 अक्षर रो होवणो चाहिए।'
+          )
+        );
         return;
       }
       if (password !== confirmPassword) {
-        setErrorMsg('Passwords do not match.');
+        setErrorMsg(
+          t(
+            'Passwords do not match. Please re-enter the same password.',
+            'पासवर्ड मेल नहीं खा रहे हैं। कृपया एक जैसा पासवर्ड दर्ज करें।',
+            'दोनूं पासवर्ड एक जैसा नी छे। कृपया सही पासवर्ड फेर लिखो।'
+          )
+        );
         return;
       }
       if (phone.trim()) {
@@ -431,6 +482,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
       if (err instanceof ApiRequestError) {
         setErrorMsg(err.message);
         setErrorDetails(err.details || null);
+        setErrorCode(err.code || null);
       } else {
         setErrorMsg(formatAuthErrorMessage(err));
       }
@@ -551,9 +603,9 @@ export const AuthPage: React.FC<AuthPageProps> = ({
         mobileNumber: mobileCheck?.valid ? mobileCheck.e164 : '',
         mobileVerified,
         mobileVerificationToken: mobileVerificationToken || undefined,
-        samagraFamilyId: samagraFamilyId.trim() || undefined,
-        samagraMemberId: samagraMemberId.trim() || undefined,
-        samagraId: samagraMemberId.trim() || samagraFamilyId.trim() || undefined,
+        samagraFamilyId: samagraFamilyId.trim(),
+        samagraMemberId: samagraMemberId.trim(),
+        samagraId: samagraMemberId.trim() || samagraFamilyId.trim(),
         areaType,
         wardNumber: areaType === 'urban' ? safeWard : undefined,
         blockName: areaType === 'rural' ? blockName : undefined,
@@ -869,10 +921,25 @@ export const AuthPage: React.FC<AuthPageProps> = ({
               <div className="bg-rose-50 border border-rose-200 text-rose-900 rounded-xl p-4 text-xs" role="alert">
                 <div className="flex items-start gap-2.5">
                   <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-                  <div className="space-y-1">
+                  <div className="space-y-1.5">
                     <p className="leading-relaxed font-semibold">{errorMsg}</p>
                     {errorDetails && (
                       <p className="leading-relaxed text-rose-700">{errorDetails}</p>
+                    )}
+                    {errorCode === 'EMAIL_ALREADY_REGISTERED' && authMode === 'signup' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAuthMode('login');
+                          setAuthMethod('email');
+                          setErrorMsg(null);
+                          setErrorDetails(null);
+                          setErrorCode(null);
+                        }}
+                        className="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-rose-700 hover:bg-rose-800 text-white font-bold text-[11px] transition cursor-pointer"
+                      >
+                        <span>{t('Switch to Sign In with this email →', 'इस ईमेल से लॉगिन करें →', 'ई ईमेल सूं लॉगिन करो →')}</span>
+                      </button>
                     )}
                   </div>
                 </div>
@@ -1268,25 +1335,44 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                       <div className="flex-grow border-t border-slate-200"></div>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                       <button
                         type="button"
-                        onClick={() => setAuthMethod('samagra')}
-                        className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-950 text-xs font-bold transition cursor-pointer"
+                        onClick={() => {
+                          setAuthMode('login');
+                          setAuthMethod('email');
+                          setErrorMsg(null);
+                          setErrorCode(null);
+                        }}
+                        className="flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition cursor-pointer"
                       >
-                        <KeyRound className="w-4 h-4 text-amber-700" />
-                        <span>{t('Login with Samagra ID', 'समग्र आईडी से लॉगिन', 'समग्र नंबर सूं लॉगिन')}</span>
+                        <Mail className="w-4 h-4 text-amber-400 shrink-0" />
+                        <span>{t('Email Sign In', 'ईमेल से लॉगिन', 'ईमेल सूं लॉगिन')}</span>
                       </button>
                       <button
                         type="button"
                         onClick={() => {
                           setAuthMode('signup');
                           setAuthMethod('email');
+                          setErrorMsg(null);
+                          setErrorCode(null);
                         }}
-                        className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold transition cursor-pointer"
+                        className="flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold transition cursor-pointer"
                       >
-                        <UserPlus className="w-4 h-4 text-slate-700" />
-                        <span>{t('New Citizen Registration', 'नया नागरिक पंजीकरण', 'नयो नागरिक खाता बनावो')}</span>
+                        <UserPlus className="w-4 h-4 shrink-0" />
+                        <span>{t('New Sign Up', 'नया पंजीकरण', 'नयो खातो बनावो')}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAuthMethod('samagra');
+                          setErrorMsg(null);
+                          setErrorCode(null);
+                        }}
+                        className="flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-950 text-xs font-bold transition cursor-pointer"
+                      >
+                        <KeyRound className="w-4 h-4 text-amber-700 shrink-0" />
+                        <span>{t('Samagra ID Login', 'समग्र आईडी लॉगिन', 'समग्र सूं लॉगिन')}</span>
                       </button>
                     </div>
                   </div>
@@ -1832,18 +1918,45 @@ export const AuthPage: React.FC<AuthPageProps> = ({
 
                     <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
                       {authMode === 'login' ? (
-                        <span className="text-xs text-slate-500">
-                          {t('Authenticated Citizen Portal Session', 'सुरक्षित नागरिक पोर्टल लॉगिन', 'सुरक्षित नागरिक लॉगिन')}
-                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAuthMode('signup');
+                            setErrorMsg(null);
+                            setErrorDetails(null);
+                            setErrorCode(null);
+                          }}
+                          className="text-xs font-semibold text-amber-700 hover:text-amber-900 hover:underline cursor-pointer"
+                        >
+                          {t(
+                            "Don't have an account? Register as New Citizen →",
+                            'खाता नहीं है? नया नागरिक पंजीकरण करें →',
+                            'नयो खातो बनावणो छे? अठे पंजीयन करो →'
+                          )}
+                        </button>
                       ) : (
-                        <span className="text-xs text-slate-500">
-                          {t('Saved securely in YojanaSetu Citizen Database', 'योजनासेतु डेटाबेस में सुरक्षित', 'योजनासेतु खाता मां सुरक्षित')}
-                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAuthMode('login');
+                            setErrorMsg(null);
+                            setErrorDetails(null);
+                            setErrorCode(null);
+                          }}
+                          className="text-xs font-semibold text-amber-700 hover:text-amber-900 hover:underline cursor-pointer"
+                        >
+                          {t(
+                            'Already have an account? Sign In →',
+                            'पहले से खाता है? लॉगिन करें →',
+                            'पेहला सूं खातो छे? लॉगिन करो →'
+                          )}
+                        </button>
                       )}
 
                       <button
                         type="submit"
                         disabled={isSubmitting}
+                        data-testid={authMode === 'login' ? 'citizen-email-login-submit' : 'citizen-email-signup-submit'}
                         className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 text-sm font-bold transition disabled:opacity-60 cursor-pointer"
                       >
                         {isSubmitting ? (

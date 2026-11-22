@@ -2,6 +2,7 @@ import React from 'react';
 import {
   Building2,
   User,
+  UserPlus,
   PhoneCall,
   Languages,
   Bookmark,
@@ -30,6 +31,7 @@ interface HeaderProps {
   onSignOut?: () => void;
   savedSchemesCount?: number;
   onOpenSavedSchemes?: () => void;
+  onOpenAuth?: (mode: 'login' | 'signup') => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -41,6 +43,7 @@ export const Header: React.FC<HeaderProps> = ({
   onSignOut,
   savedSchemesCount = 0,
   onOpenSavedSchemes,
+  onOpenAuth,
 }) => {
   const selectCitizenTab = (tab: string) => {
     setActiveTab(tab);
@@ -309,22 +312,38 @@ export const Header: React.FC<HeaderProps> = ({
                 </button>
               </div>
             ) : (
-              <button
-                type="button"
-                onClick={() => selectCitizenTab('auth')}
-                className={`min-h-[38px] inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-bold rounded-xl transition shadow-2xs cursor-pointer whitespace-nowrap shrink-0 ${
-                  activeTab === 'auth'
-                    ? 'bg-slate-900 text-white border border-slate-900'
-                    : 'text-slate-800 bg-white hover:bg-slate-50 border border-slate-300'
-                }`}
-                title={t('Citizen Login & Registration', 'नागरिक लॉगिन व पंजीकरण', 'नागरिक लॉगिन अने पंजीयन')}
-              >
-                <User className="w-3.5 h-3.5 shrink-0" />
-                <span className="hidden sm:inline">
-                  {t('Login / Sign Up', 'लॉगिन / पंजीकरण', 'लॉगिन / नयो खातो')}
-                </span>
-                <span className="sm:hidden">{t('Login', 'लॉगिन', 'लॉगिन')}</span>
-              </button>
+              <div className="flex items-center space-x-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onOpenAuth) onOpenAuth('login');
+                    else selectCitizenTab('auth');
+                  }}
+                  data-testid="header-login-btn"
+                  className={`min-h-[38px] inline-flex items-center space-x-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-bold rounded-xl transition shadow-2xs cursor-pointer whitespace-nowrap shrink-0 ${
+                    activeTab === 'auth'
+                      ? 'bg-slate-900 text-white border border-slate-900'
+                      : 'text-slate-800 bg-white hover:bg-slate-50 border border-slate-300'
+                  }`}
+                  title={t('Citizen Login', 'नागरिक लॉगिन', 'नागरिक लॉगिन')}
+                >
+                  <User className="w-3.5 h-3.5 shrink-0" />
+                  <span>{t('Login', 'लॉगिन', 'लॉगिन')}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onOpenAuth) onOpenAuth('signup');
+                    else selectCitizenTab('auth');
+                  }}
+                  data-testid="header-signup-btn"
+                  className="hidden sm:inline-flex min-h-[38px] items-center space-x-1.5 px-3 py-1.5 text-xs font-bold rounded-xl transition shadow-2xs cursor-pointer whitespace-nowrap shrink-0 bg-amber-500 hover:bg-amber-600 text-slate-950 border border-amber-500"
+                  title={t('Create Citizen Account', 'नया नागरिक पंजीकरण', 'नयो नागरिक खातो बनावो')}
+                >
+                  <UserPlus className="w-3.5 h-3.5 shrink-0" />
+                  <span>{t('Sign Up', 'पंजीकरण', 'नयो खातो')}</span>
+                </button>
+              </div>
             )}
           </div>
         </div>

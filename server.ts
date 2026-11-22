@@ -315,6 +315,9 @@ app.post('/api/citizen/auth/register', async (req: Request, res: Response) => {
     if (!password || password.length < 6) {
       return sendApiError(res, 400, 'Password must be at least 6 characters long.');
     }
+    if (password.length > 128) {
+      return sendApiError(res, 400, 'Password must be 128 characters or fewer.');
+    }
     if (!displayName) {
       return sendApiError(res, 400, 'Please enter your full name as per Aadhaar / Samagra.');
     }
@@ -472,6 +475,12 @@ app.post('/api/citizen/auth/login', async (req: Request, res: Response) => {
     if (!rawEmail || !password) {
       return sendApiError(res, 400, 'Please enter both email address and password.');
     }
+    if (!isValidEmail(rawEmail)) {
+      return sendApiError(res, 400, 'Please enter a valid email address.');
+    }
+    if (password.length > 128) {
+      return sendApiError(res, 400, 'Invalid email or password. Please verify your credentials.');
+    }
 
     const account = await dbService.getCitizenAccountByEmail(rawEmail);
     if (!account) {
@@ -606,7 +615,9 @@ const handleUpdateCitizenProfile = async (req: Request, res: Response) => {
       samagraId:
         body.samagraId !== undefined
           ? clampString(body.samagraId, 20) || ''
-          : memStr || famStr || undefined,
+          : memStr !== undefined || famStr !== undefined
+          ? memStr || famStr || ''
+          : undefined,
       areaType,
       wardNumber:
         areaType === 'rural' ? undefined : clampInt(body.wardNumber, 1, 85),

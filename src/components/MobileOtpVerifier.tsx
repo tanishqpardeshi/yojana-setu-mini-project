@@ -265,10 +265,23 @@ export const MobileOtpVerifier: React.FC<MobileOtpVerifierProps> = ({
           </span>
         ) : value.trim().length > 0 ? (
           <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
-            <span>{t('OTP Verification Pending', 'OTP सत्यापन शेष', 'OTP जांच बाकी')}</span>
+            <span>
+              {required
+                ? t('OTP Verification Pending', 'OTP सत्यापन शेष', 'OTP जांच बाकी')
+                : t('OTP Optional', 'OTP वैकल्पिक', 'OTP चाहो तो')}
+            </span>
           </span>
         ) : null}
       </div>
+      {!required && !isVerified && (
+        <p className="text-[11px] text-slate-500">
+          {t(
+            'Optional: You can create your account or save changes right away and verify SMS OTP anytime.',
+            'वैकल्पिक: आप बिना OTP के भी तुरंत खाता बना सकते हैं और बाद में मोबाइल सत्यापित कर सकते हैं।',
+            'चाहो तो: बिना OTP भी तुरंत नयो खातो बण सके छे, मोबाइल जांच बाद मां भी कर सको छो।'
+          )}
+        </p>
+      )}
 
       <div className="flex flex-col sm:flex-row gap-2">
         <div className="relative flex-1">

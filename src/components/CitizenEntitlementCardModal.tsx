@@ -9,9 +9,14 @@ import {
   Award,
   Share2,
   Copy,
+  ExternalLink,
 } from 'lucide-react';
 import { CitizenProfile, SchemeEligibilityResult, SupportedLanguage } from '../types';
-import { computeEntitlementDigest } from '../utils/liveDataEngine';
+import {
+  computeEntitlementDigest,
+  getOfficialPortalDisplayHost,
+  resolveSchemePortalUrl,
+} from '../utils/liveDataEngine';
 import {
   getFrequencyLabel,
   getGenderLabel,
@@ -280,6 +285,16 @@ export const CitizenEntitlementCardModal: React.FC<CitizenEntitlementCardModalPr
                           <div className="text-[10px] font-normal text-slate-500">
                             {currentLanguage === 'en' ? item.scheme.titleHindi : item.scheme.title}
                           </div>
+                          <a
+                            href={resolveSchemePortalUrl(item.scheme)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mt-0.5 inline-flex items-center gap-1 text-[10px] font-mono font-bold text-emerald-700 hover:text-emerald-900 hover:underline"
+                          >
+                            <ShieldCheck className="w-3 h-3 shrink-0" />
+                            <span>{getOfficialPortalDisplayHost(item.scheme)}</span>
+                            <ExternalLink className="w-2.5 h-2.5 shrink-0" />
+                          </a>
                         </td>
                         <td className="px-3 py-2 font-mono font-bold text-emerald-700 whitespace-nowrap">
                           ₹{item.scheme.financialEntitlement.amount.toLocaleString('en-IN')}{' '}
@@ -305,6 +320,16 @@ export const CitizenEntitlementCardModal: React.FC<CitizenEntitlementCardModalPr
                           <div className="text-[10px] font-normal text-slate-500">
                             {currentLanguage === 'en' ? item.scheme.titleHindi : item.scheme.title}
                           </div>
+                          <a
+                            href={resolveSchemePortalUrl(item.scheme)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mt-0.5 inline-flex items-center gap-1 text-[10px] font-mono font-bold text-emerald-700 hover:text-emerald-900 hover:underline"
+                          >
+                            <ShieldCheck className="w-3 h-3 shrink-0" />
+                            <span>{getOfficialPortalDisplayHost(item.scheme)}</span>
+                            <ExternalLink className="w-2.5 h-2.5 shrink-0" />
+                          </a>
                         </td>
                         <td className="px-3 py-2 font-mono font-bold text-amber-700 whitespace-nowrap">
                           ₹{item.scheme.financialEntitlement.amount.toLocaleString('en-IN')}{' '}

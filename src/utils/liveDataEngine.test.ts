@@ -25,10 +25,20 @@ test('createEmptyCitizenProfile returns clean unlinked citizen profile with zero
 });
 
 test('resolveSchemePortalUrl maps all 51 schemes to explicit verified https official government portals', () => {
+  assert.equal(SCHEMES_DATABASE.length, 51, 'Expected 51 baseline schemes');
   for (const scheme of SCHEMES_DATABASE) {
+    assert.ok(
+      scheme.applyUrl && scheme.applyUrl.startsWith('https://'),
+      `Expected explicit https applyUrl directly on scheme ${scheme.id}, got ${scheme.applyUrl}`
+    );
     assert.ok(
       OFFICIAL_SCHEME_PORTAL_URLS[scheme.id],
       `Expected explicit official portal URL mapping for ${scheme.id}`
+    );
+    assert.equal(
+      scheme.applyUrl,
+      OFFICIAL_SCHEME_PORTAL_URLS[scheme.id],
+      `Expected scheme.applyUrl to match verified official URL for ${scheme.id}`
     );
     const url = resolveSchemePortalUrl(scheme);
     assert.ok(url.startsWith('https://'), `Expected https portal URL for ${scheme.id}, got ${url}`);
@@ -37,6 +47,15 @@ test('resolveSchemePortalUrl maps all 51 schemes to explicit verified https offi
   assert.equal(resolveSchemePortalUrl(pmKisan), 'https://pmkisan.gov.in/');
   const pmfby = SCHEMES_DATABASE.find(s => s.id === 'pmfby_crop_insurance')!;
   assert.equal(resolveSchemePortalUrl(pmfby), 'https://pmfby.gov.in/');
+
+  // Ensure unsafe non-http(s) URLs are rejected and fall back safely
+  const unsafeResolved = resolveSchemePortalUrl({
+    id: 'custom_test_scheme',
+    governanceLevel: 'district_indore',
+    applyUrl: 'javascript:alert(1)',
+    dataOrigin: 'admin_live',
+  });
+  assert.equal(unsafeResolved, 'https://indore.nic.in/');
 });
 
 test('getSchemeApplicationProcedure returns complete EN, HI, and Malwi procedures for all 51 schemes', () => {

@@ -614,7 +614,7 @@ async function initPostgres(databaseUrl: string): Promise<void> {
         inserted += 1;
       } else {
         await client.query(
-          `UPDATE schemes SET apply_url = $1 WHERE id = $2 AND (apply_url IS NULL OR trim(apply_url) = '')`,
+          `UPDATE schemes SET apply_url = $1 WHERE id = $2 AND (data_origin = 'baseline_catalog' OR apply_url IS NULL OR trim(apply_url) = '')`,
           [portalUrl, s.id]
         );
       }

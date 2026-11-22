@@ -42,9 +42,9 @@ export const OFFICIAL_SCHEME_PORTAL_URLS: Record<string, string> = {
   mp_sambal_2: 'https://sambal.mp.gov.in/',
   mp_seekho_kamao: 'https://mmsky.mp.gov.in/',
   mp_kanya_vivah: 'https://vivahportal.mp.gov.in/',
-  mp_medhavi_vidyarthi: 'https://scholarshipportal.mp.nic.in/',
+  mp_medhavi_vidyarthi: 'https://scholarshipportal.mp.nic.in/MedhaviChhatra/',
   mp_udyam_kranti: 'https://samast.mponline.gov.in/',
-  mp_krishak_mitra_solar: 'https://energy.mp.gov.in/',
+  mp_krishak_mitra_solar: 'https://cmsolarpump.mp.gov.in/',
   mp_teerth_darshan: 'https://dharmasva.mp.gov.in/',
   mp_gaon_ki_beti: 'https://scholarshipportal.mp.nic.in/',
   mp_pratibha_kiran: 'https://scholarshipportal.mp.nic.in/',
@@ -54,16 +54,16 @@ export const OFFICIAL_SCHEME_PORTAL_URLS: Record<string, string> = {
   mp_ration_aapke_gram: 'https://food.mp.gov.in/',
 
   // Level 4: District Collectorate Indore (6 Schemes)
-  indore_redcross_arogya: 'https://indore.nic.in/',
+  indore_redcross_arogya: 'https://indore.nic.in/en/schemes/',
   indore_ahilya_divyang: 'https://socialjustice.mp.gov.in/',
-  indore_jal_hath_recharge: 'https://indore.nic.in/',
+  indore_jal_hath_recharge: 'https://indore.nic.in/en/schemes/',
   indore_tribal_livelihood_grant: 'https://www.tribal.mp.gov.in/',
   indore_district_innovation_voucher: 'https://startup.mp.gov.in/',
-  indore_ahilya_annapurna_meals: 'https://indore.nic.in/',
+  indore_ahilya_annapurna_meals: 'https://indore.nic.in/en/schemes/',
 
   // Level 5: Indore Municipal Corporation — IMC Wards 1-85 (5 Schemes)
   imc_swachhata_mitr: 'https://imcindore.mp.gov.in/',
-  imc_rooftop_solar: 'https://imcindore.mp.gov.in/',
+  imc_rooftop_solar: 'https://www.mpwz.co.in/',
   imc_pink_vending_zone: 'https://imcindore.mp.gov.in/',
   imc_rainwater_harvesting_rebate: 'https://www.mpenagarpalika.gov.in/',
   imc_ev_charging_grant: 'https://smartcityindore.org/',
@@ -72,7 +72,7 @@ export const OFFICIAL_SCHEME_PORTAL_URLS: Record<string, string> = {
   janpad_malwi_cow_dairy: 'https://mpdah.gov.in/',
   janpad_mhow_bamboo_forest: 'https://mpforest.gov.in/',
   janpad_sanwer_onion_storage: 'https://mpfsts.mp.gov.in/',
-  janpad_indore_custom_hiring: 'https://mpkrishi.mp.gov.in/',
+  janpad_indore_custom_hiring: 'https://farmer.mpdage.org/',
   corridor_pithampur_rural_skill: 'https://invest.mp.gov.in/',
   corridor_ujjain_mandi_logistics: 'https://mpmandiboard.gov.in/',
 };
@@ -86,17 +86,27 @@ export const GOVERNANCE_LEVEL_DEFAULT_PORTALS: Record<GovernanceLevel, string> =
   rural_janpad: 'https://prd.mp.gov.in/',
 };
 
+export function isSafeHttpUrl(url: string | undefined | null): boolean {
+  if (!url || typeof url !== 'string') return false;
+  try {
+    const parsed = new URL(url.trim());
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
 export function resolveSchemePortalUrl(
   scheme: Pick<Scheme, 'id' | 'governanceLevel' | 'applyUrl'> & { dataOrigin?: Scheme['dataOrigin'] }
 ): string {
-  if (scheme.dataOrigin === 'admin_live' && scheme.applyUrl && /^https?:\/\//i.test(scheme.applyUrl)) {
-    return scheme.applyUrl;
+  if (scheme.dataOrigin === 'admin_live' && isSafeHttpUrl(scheme.applyUrl)) {
+    return scheme.applyUrl!.trim();
   }
   if (OFFICIAL_SCHEME_PORTAL_URLS[scheme.id]) {
     return OFFICIAL_SCHEME_PORTAL_URLS[scheme.id];
   }
-  if (scheme.applyUrl && /^https?:\/\//i.test(scheme.applyUrl)) {
-    return scheme.applyUrl;
+  if (isSafeHttpUrl(scheme.applyUrl)) {
+    return scheme.applyUrl!.trim();
   }
   return GOVERNANCE_LEVEL_DEFAULT_PORTALS[scheme.governanceLevel];
 }
