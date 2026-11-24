@@ -306,8 +306,17 @@ async function initPostgres(databaseUrl: string): Promise<void> {
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 8000,
   });
+  pool.on('error', () => {
+    // Prevent unhandled pool error events during fallback or idle disconnects
+  });
 
-  const client: PoolClient = await pool.connect();
+  let client: PoolClient;
+  try {
+    client = await pool.connect();
+  } catch (err) {
+    await pool.end().catch(() => {});
+    throw err;
+  }
   try {
     await client.query(`
       CREATE TABLE IF NOT EXISTS schemes (
@@ -1146,11 +1155,8 @@ async function ensureInitialized(): Promise<void> {
         try {
           await initPostgres(databaseUrl);
           return;
-        } catch (err) {
-          console.warn(
-            '[Database] Could not connect to Supabase PostgreSQL via DATABASE_URL; falling back to local SQLite database:',
-            err instanceof Error ? err.message : String(err)
-          );
+        } catch {
+          console.log('[Database] Remote PostgreSQL unavailable; using local SQLite database.');
         }
       }
       initSqlite();

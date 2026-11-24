@@ -54,6 +54,7 @@ import { SavedSchemesModal } from './components/SavedSchemesModal';
 import { AuthPage } from './components/AuthPage';
 import { ToastContainer, ToastItem } from './components/ToastContainer';
 import { ApiRequestError, parseApiResponse } from './utils/apiClient';
+import { verifySamagraId } from './services/govApiService';
 import {
   AdminAuthResult,
   AdminSessionInfo,
@@ -604,10 +605,9 @@ export default function App() {
       if (savedRaw) {
         const parsed = JSON.parse(savedRaw) as { familyId?: string; memberId?: string };
         if (parsed.familyId && parsed.memberId) {
-          fetch(`/api/samagra/${encodeURIComponent(parsed.familyId)}`)
-            .then(r => (r.ok ? r.json() : null))
-            .then(data => {
-              const fam: SamagraFamily | undefined = data?.family;
+          verifySamagraId(parsed.memberId)
+            .then(result => {
+              const fam = result.ok ? result.family : undefined;
               const mem = fam?.members.find(m => m.memberId === parsed.memberId);
               if (fam && mem) {
                 setCitizenProfile(buildProfileFromSamagraMember(mem, fam));
@@ -1178,6 +1178,7 @@ export default function App() {
   const handleSelectMemberForProfile = (member: FamilyMember, family: SamagraFamily) => {
     const nextProfile = buildProfileFromSamagraMember(member, family);
     setCitizenProfile(nextProfile);
+    setIsProfileFilterApplied(true);
     try {
       localStorage.setItem(
         ACTIVE_SAMAGRA_STORAGE_KEY,
@@ -1216,12 +1217,18 @@ export default function App() {
         });
       });
     }
+    showToast({
+      type: 'success',
+      title: 'Citizen Profile Auto-Populated',
+      message: `Loaded ${member.name} (Samagra ${member.memberId}). Sync DigiLocker next to upgrade Likely (85%) schemes to Eligible (100%).`,
+    });
     handleSelectCitizenTab('schemes');
   };
 
   const handleSamagraSessionLogin = async (member: FamilyMember, family: SamagraFamily) => {
     const nextProfile = buildProfileFromSamagraMember(member, family);
     setCitizenProfile(nextProfile);
+    setIsProfileFilterApplied(true);
     try {
       localStorage.setItem(
         ACTIVE_SAMAGRA_STORAGE_KEY,
@@ -1250,6 +1257,12 @@ export default function App() {
         ekycVerified: member.ekycStatus,
       });
     }
+    showToast({
+      type: 'success',
+      title: `Samagra Verified: ${member.name}`,
+      message: `Profile auto-populated (${member.memberId}). Open DigiLocker Vault to verify documents & upgrade Likely (85%) schemes to Eligible (100%).`,
+    });
+    handleSelectCitizenTab('schemes');
   };
 
   // Submit live application to PostgreSQL / SQLite + Firestore (Citizen action)
@@ -1771,11 +1784,13 @@ export default function App() {
             citizenKey={activeCitizenKey}
             credentials={digiLockerCredentials}
             oauthMeta={digiLockerOAuthMeta}
+            schemes={schemes}
             onSyncDocumentsFromServer={handleSyncDocumentsFromServer}
             onRefreshWallet={() =>
               syncCitizenDigiLockerWallet(activeCitizenKey || 'citizen_oauth')
             }
             onNavigateToSamagra={() => handleSelectCitizenTab('samagra')}
+            onNavigateToSchemes={() => handleSelectCitizenTab('schemes')}
             onNotify={showToast}
           />
         )}

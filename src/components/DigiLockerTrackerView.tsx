@@ -18,16 +18,21 @@ import {
   CitizenProfile,
   DigiLockerCredentialRecord,
   DigiLockerDocumentRecord,
+  Scheme,
   SupportedLanguage,
 } from '../types';
 import { STANDARD_DOCUMENTS } from '../data/indoreGovernance';
 import { parseApiResponse } from '../utils/apiClient';
+import { USE_MOCK_API } from '../services/govApiService';
+import { rankSchemesForCitizen } from '../utils/rulesEngine';
+import { DigiLockerConsentModal } from './DigiLockerConsentModal';
 import { ToastItem } from './ToastContainer';
 import { getDocumentLabel, pickText } from '../utils/i18n';
 
 interface DigiLockerTrackerViewProps {
   currentLanguage: SupportedLanguage;
   profile: CitizenProfile;
+  schemes?: Scheme[];
   citizenKey: string | null;
   credentials?: DigiLockerCredentialRecord[];
   oauthMeta?: { oauthConfigured: boolean; redirectUri?: string };
@@ -37,24 +42,34 @@ interface DigiLockerTrackerViewProps {
   ) => void;
   onRefreshWallet?: () => Promise<void>;
   onNavigateToSamagra: () => void;
+  onNavigateToSchemes?: () => void;
   onNotify?: (toast: Omit<ToastItem, 'id'>) => void;
 }
 
 export const DigiLockerTrackerView: React.FC<DigiLockerTrackerViewProps> = ({
   currentLanguage,
   profile,
+  schemes = [],
   citizenKey,
   credentials = [],
   oauthMeta,
   onSyncDocumentsFromServer,
   onRefreshWallet,
   onNavigateToSamagra,
+  onNavigateToSchemes,
   onNotify,
 }) => {
   const t = (en: string, hi: string, malwi: string) =>
     pickText(currentLanguage, { en, hi, malwi });
 
   const [connectingOAuth, setConnectingOAuth] = useState(false);
+  const [isConsentModalOpen, setIsConsentModalOpen] = useState(false);
+  const [eligibilityUpgradeBanner, setEligibilityUpgradeBanner] = useState<{
+    beforeEligible: number;
+    afterEligible: number;
+    upgradedCount: number;
+    consentId?: string;
+  } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [revokingKey, setRevokingKey] = useState<string | null>(null);
   const [consentGranted, setConsentGranted] = useState(true);
@@ -143,6 +158,11 @@ export const DigiLockerTrackerView: React.FC<DigiLockerTrackerViewProps> = ({
         'Please grant explicit Aadhaar / DigiLocker OAuth 2.0 consent before initiating authorization.';
       setErrorMessage(msg);
       onNotify?.({ type: 'warning', title: 'Consent Required', message: msg });
+      return;
+    }
+
+    if (USE_MOCK_API) {
+      setIsConsentModalOpen(true);
       return;
     }
 
@@ -389,12 +409,14 @@ export const DigiLockerTrackerView: React.FC<DigiLockerTrackerViewProps> = ({
                 </span>
                 <span
                   className={`text-[11px] px-2.5 py-0.5 rounded-full font-mono border ${
-                    oauthMeta?.oauthConfigured
+                    USE_MOCK_API || oauthMeta?.oauthConfigured
                       ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
                       : 'bg-amber-500/20 text-amber-200 border-amber-400/30'
                   }`}
                 >
-                  {oauthMeta?.oauthConfigured
+                  {USE_MOCK_API
+                    ? t('OAuth 2.0 Sandbox Ready', 'OAuth 2.0 सैंडबॉक्स सक्रिय', 'OAuth 2.0 तैयार छे')
+                    : oauthMeta?.oauthConfigured
                     ? t('OAuth 2.0 Configured', 'OAuth 2.0 सक्रिय', 'OAuth 2.0 चालू छे')
                     : t('Credentials Required', 'क्रेडेंशियल आवश्यक', 'क्रेडेंशियल जरूरी')}
                 </span>
@@ -465,6 +487,44 @@ export const DigiLockerTrackerView: React.FC<DigiLockerTrackerViewProps> = ({
           </span>
         </label>
       </div>
+
+      {/* Dynamic Eligibility Upgrade Banner after DigiLocker Sync */}
+      {eligibilityUpgradeBanner && (
+        <div
+          role="status"
+          data-testid="digilocker-eligibility-upgrade-banner"
+          className="p-4 rounded-2xl bg-emerald-50 border-2 border-emerald-300 text-emerald-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+        >
+          <div className="flex items-start gap-2.5 text-xs">
+            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+            <div className="space-y-0.5">
+              <p className="font-black text-emerald-900">
+                {eligibilityUpgradeBanner.upgradedCount > 0
+                  ? `${eligibilityUpgradeBanner.upgradedCount} Scheme${eligibilityUpgradeBanner.upgradedCount === 1 ? '' : 's'} Upgraded from Likely (85%) → Eligible (100%)!`
+                  : `DigiLocker Wallet Synced — ${eligibilityUpgradeBanner.afterEligible} Scheme${eligibilityUpgradeBanner.afterEligible === 1 ? '' : 's'} at 100% Eligible!`}
+              </p>
+              <p className="text-emerald-800">
+                Verified certificates from DigiLocker have automatically resolved pending document requirements in the Eligibility Rules Engine.
+                {eligibilityUpgradeBanner.consentId && (
+                  <span className="font-mono ml-1.5 text-[11px] text-emerald-700">
+                    ({eligibilityUpgradeBanner.consentId})
+                  </span>
+                )}
+              </p>
+            </div>
+          </div>
+          {onNavigateToSchemes && (
+            <button
+              type="button"
+              onClick={onNavigateToSchemes}
+              className="px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-xs whitespace-nowrap cursor-pointer shrink-0"
+            >
+              <span>{t('View Eligible (100%) Schemes', 'पात्र (100%) योजनाएं देखें', 'पक्की पात्र योजना देखो')}</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Inline Status / Error Alerts */}
       {statusMessage && (
@@ -751,6 +811,63 @@ export const DigiLockerTrackerView: React.FC<DigiLockerTrackerViewProps> = ({
           })}
         </div>
       </div>
+
+      {/* Interactive DigiLocker OAuth 2.0 Consent Modal (Mock Sandbox) */}
+      <DigiLockerConsentModal
+        isOpen={isConsentModalOpen}
+        onClose={() => setIsConsentModalOpen(false)}
+        citizenKey={effectiveCitizenKey}
+        citizenName={profile.fullName}
+        samagraMemberId={profile.samagraMemberId}
+        currentLanguage={currentLanguage}
+        onAuthorizedSuccess={({ documents, credentials: syncedCreds, issuedDocs, consentId }) => {
+          setIsConsentModalOpen(false);
+          setErrorMessage(null);
+          setErrorDetails(null);
+
+          // Compute live rules-engine upgrade from Likely (85%) -> Eligible (100%)
+          const beforeEligible =
+            schemes.length > 0
+              ? rankSchemesForCitizen(profile, schemes).filter(r => r.status === 'eligible').length
+              : 0;
+          const nextVerifiedMap = { ...profile.verifiedDocuments };
+          for (const d of documents) {
+            nextVerifiedMap[d.docId] = {
+              verified: Boolean(d.verified),
+              source: d.source,
+              docNumber: d.docNumber,
+              issuer: d.issuer,
+              verifiedAt: d.verifiedAt,
+            };
+          }
+          const afterEligible =
+            schemes.length > 0
+              ? rankSchemesForCitizen(
+                  { ...profile, verifiedDocuments: nextVerifiedMap },
+                  schemes
+                ).filter(r => r.status === 'eligible').length
+              : 0;
+          const upgradedCount = Math.max(0, afterEligible - beforeEligible);
+
+          onSyncDocumentsFromServer(documents, syncedCreds);
+          setEligibilityUpgradeBanner({
+            beforeEligible,
+            afterEligible,
+            upgradedCount,
+            consentId,
+          });
+          const okMsg = `Fetched ${issuedDocs.length} verified documents from DigiLocker OAuth 2.0 (${consentId || 'Bearer Token Verified'}).`;
+          setStatusMessage(okMsg);
+          onNotify?.({
+            type: 'success',
+            title:
+              upgradedCount > 0
+                ? `${upgradedCount} Schemes Upgraded to Eligible (100%)`
+                : 'DigiLocker Documents Synced',
+            message: okMsg,
+          });
+        }}
+      />
     </div>
   );
 };

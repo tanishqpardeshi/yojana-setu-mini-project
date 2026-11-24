@@ -42,6 +42,15 @@ import {
   resolveAppBaseUrl,
 } from './server/digilockerService.js';
 import {
+  fetchMockDigiLockerIssuedDocs,
+  issueMockDigiLockerToken,
+  lookupMockSamagra,
+  MOCK_SAMAGRA_CITIZENS,
+  sendMockDltOtp,
+  simulateGovLatency,
+  verifyMockDltOtp,
+} from './server/mockGovService.js';
+import {
   SAMAGRA_PORTAL_URL,
   validateIndianMobile,
   validateSamagraFamilyId,
@@ -1937,6 +1946,232 @@ app.delete('/api/digilocker/:citizenKey/:docId', async (req: Request, res: Respo
       res,
       500,
       'Failed to revoke DigiLocker document.',
+      err instanceof Error ? err.message : undefined
+    );
+  }
+});
+
+// ================= SELF-CONTAINED MOCK INDIAN e-GOVERNANCE API LAYER (/api/gov/*) =================
+
+// 0. Demo test profiles metadata (non-sensitive sandbox directory)
+app.get('/api/gov/demo-profiles', (_req: Request, res: Response) => {
+  res.json({
+    mode: 'MOCK_SANDBOX',
+    profiles: MOCK_SAMAGRA_CITIZENS.map(c => ({
+      memberId: c.memberId,
+      familyId: c.familyId,
+      name: c.name,
+      nameHindi: c.nameHindi,
+      gender: c.gender,
+      age: c.age,
+      areaType: c.areaType,
+      localBody: c.localBody,
+      annualIncome: c.annualIncome,
+      occupation: c.occupation,
+      landHoldingHectares: c.landHoldingHectares,
+      mobileNumber: c.mobileNumber,
+      tierTag: c.tierTag,
+      expectedSchemesSummary: c.expectedSchemesSummary,
+    })),
+  });
+});
+
+// 1. MP Samagra Portal Mock Verification API (GET or POST /api/gov/samagra/verify)
+const handleMockSamagraVerify = async (req: Request, res: Response) => {
+  try {
+    const rawId =
+      typeof req.query.memberId === 'string'
+        ? req.query.memberId
+        : typeof req.query.id === 'string'
+        ? req.query.id
+        : typeof req.body?.memberId === 'string'
+        ? req.body.memberId
+        : typeof req.body?.id === 'string'
+        ? req.body.id
+        : '';
+
+    const latencyMs = await simulateGovLatency(400, 800);
+    const result = lookupMockSamagra(rawId);
+    res.setHeader('X-Gov-Mock-Latency-Ms', String(latencyMs));
+    return res.status(result.httpStatus).json({
+      ...result.payload,
+      latencyMs,
+    });
+  } catch (err) {
+    console.error('[API /api/gov/samagra/verify] Error:', err);
+    return sendApiError(
+      res,
+      500,
+      'Failed to verify Samagra ID via mock gateway.',
+      err instanceof Error ? err.message : undefined
+    );
+  }
+};
+
+app.get('/api/gov/samagra/verify', handleMockSamagraVerify);
+app.post('/api/gov/samagra/verify', handleMockSamagraVerify);
+
+// 2. Indian TRAI DLT-Compliant SMS OTP Gateway Mock API
+app.post('/api/gov/otp/send', async (req: Request, res: Response) => {
+  try {
+    const rawMobile =
+      typeof req.body?.mobile === 'string'
+        ? req.body.mobile
+        : typeof req.body?.mobileNumber === 'string'
+        ? req.body.mobileNumber
+        : '';
+
+    const latencyMs = await simulateGovLatency(400, 750);
+    const result = sendMockDltOtp(rawMobile);
+    res.setHeader('X-Gov-Mock-Latency-Ms', String(latencyMs));
+    return res.status(result.httpStatus).json({
+      ...result.payload,
+      latencyMs,
+    });
+  } catch (err) {
+    console.error('[API POST /api/gov/otp/send] Error:', err);
+    return sendApiError(
+      res,
+      500,
+      'Failed to dispatch DLT mock SMS OTP.',
+      err instanceof Error ? err.message : undefined
+    );
+  }
+});
+
+app.post('/api/gov/otp/verify', async (req: Request, res: Response) => {
+  try {
+    const rawMobile =
+      typeof req.body?.mobile === 'string'
+        ? req.body.mobile
+        : typeof req.body?.mobileNumber === 'string'
+        ? req.body.mobileNumber
+        : '';
+    const rawOtp =
+      typeof req.body?.otp === 'string' || typeof req.body?.otp === 'number'
+        ? String(req.body.otp).trim()
+        : '';
+
+    const latencyMs = await simulateGovLatency(400, 700);
+    const result = verifyMockDltOtp(rawMobile, rawOtp);
+    res.setHeader('X-Gov-Mock-Latency-Ms', String(latencyMs));
+
+    if (result.ok) {
+      let citizenUid: string | undefined;
+      const authHeader = req.headers.authorization;
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        try {
+          const { verifyCitizenSessionToken } = await import('./server/citizenAuth.js');
+          const payload = verifyCitizenSessionToken(authHeader.slice(7).trim());
+          citizenUid = payload.sub;
+        } catch {
+          // ignore optional token if not signed in yet
+        }
+      }
+      await dbService.markCitizenMobileVerified(result.payload.mobileNumber, citizenUid).catch(() => {});
+    }
+
+    return res.status(result.httpStatus).json({
+      ...result.payload,
+      latencyMs,
+    });
+  } catch (err) {
+    console.error('[API POST /api/gov/otp/verify] Error:', err);
+    return sendApiError(
+      res,
+      500,
+      'Failed to verify DLT mock SMS OTP.',
+      err instanceof Error ? err.message : undefined
+    );
+  }
+});
+
+// 3. DigiLocker Requester Mock OAuth 2.0 Token Exchange & Issued Document Fetch
+app.post('/api/gov/digilocker/token', async (req: Request, res: Response) => {
+  try {
+    const citizenKey = clampString(req.body?.citizenKey, 128) || 'citizen_oauth';
+    const memberId = clampString(req.body?.memberId, 24);
+    const scopes = Array.isArray(req.body?.scopes)
+      ? req.body.scopes.filter((s: unknown): s is string => typeof s === 'string').slice(0, 10)
+      : ['openid', 'profile', 'documents.read'];
+
+    const latencyMs = await simulateGovLatency(420, 720);
+    const tokenPayload = issueMockDigiLockerToken({
+      citizenKey,
+      memberId,
+      scopes,
+    });
+
+    res.setHeader('X-Gov-Mock-Latency-Ms', String(latencyMs));
+    return res.json({
+      ...tokenPayload,
+      latencyMs,
+    });
+  } catch (err) {
+    console.error('[API POST /api/gov/digilocker/token] Error:', err);
+    return sendApiError(
+      res,
+      500,
+      'Failed to exchange DigiLocker consent for access token.',
+      err instanceof Error ? err.message : undefined
+    );
+  }
+});
+
+app.get('/api/gov/digilocker/docs', async (req: Request, res: Response) => {
+  try {
+    const authHeader = req.headers.authorization || '';
+    const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+
+    const latencyMs = await simulateGovLatency(450, 800);
+    const result = fetchMockDigiLockerIssuedDocs(bearerToken);
+    res.setHeader('X-Gov-Mock-Latency-Ms', String(latencyMs));
+
+    if (!result.ok) {
+      return sendApiError(res, result.httpStatus, result.error, undefined, { code: result.code });
+    }
+
+    // Persist synced credentials & documents into the local wallet DB so revoking & reloads stay synced
+    for (const cred of result.credentials) {
+      await dbService.upsertDigiLockerCredential(cred);
+      if (cred.docId) {
+        await dbService.upsertDigiLockerDocument({
+          citizenKey: result.citizenKey,
+          docId: cred.docId,
+          docNumber: cred.docNumber || cred.docUri,
+          source: 'digilocker',
+          issuer: cred.issuer,
+          verified: true,
+          verifiedAt: cred.verifiedAt,
+        });
+      }
+    }
+
+    const [persistedDocs, persistedCreds] = await Promise.all([
+      dbService.getDigiLockerDocuments(result.citizenKey),
+      dbService.getDigiLockerCredentials(result.citizenKey),
+    ]);
+
+    pushSsePayload({ eventType: 'digilocker_updated', citizenKey: result.citizenKey });
+
+    return res.json({
+      status: 'SUCCESS',
+      source: 'DIGILOCKER_MOCK_REQUESTER_API',
+      citizenKey: result.citizenKey,
+      consentId: result.consentId,
+      scopes: result.scopes,
+      count: result.issuedDocs.length,
+      issuedDocs: result.issuedDocs,
+      credentials: persistedCreds.length > 0 ? persistedCreds : result.credentials,
+      documents: persistedDocs.length > 0 ? persistedDocs : result.documents,
+      latencyMs,
+    });
+  } catch (err) {
+    console.error('[API GET /api/gov/digilocker/docs] Error:', err);
+    return sendApiError(
+      res,
+      500,
+      'Failed to fetch DigiLocker issued documents.',
       err instanceof Error ? err.message : undefined
     );
   }

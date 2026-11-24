@@ -33,6 +33,11 @@ import { rankSchemesForCitizen } from '../utils/rulesEngine';
 import { ToastItem } from './ToastContainer';
 import { parseApiResponse } from '../utils/apiClient';
 import {
+  DemoCitizenCredential,
+  verifySamagraId,
+} from '../services/govApiService';
+import { DemoCredentialsCard } from './DemoCredentialsCard';
+import {
   SAMAGRA_PORTAL_URL,
   validateSamagraFamilyId,
   validateSamagraLookupId,
@@ -148,6 +153,7 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
   const [selectedFamily, setSelectedFamily] = useState<SamagraFamily | null>(null);
   const [loadingList, setLoadingList] = useState(true);
   const [searching, setSearching] = useState(false);
+  const [loadingDemoMemberId, setLoadingDemoMemberId] = useState<string | null>(null);
   const [updatingMemberId, setUpdatingMemberId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [errorDetails, setErrorDetails] = useState<string | null>(null);
@@ -232,15 +238,16 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeFamilyId]);
 
-  const handleSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (searching) return;
+  const executeSamagraLookup = async (
+    rawQuery: string,
+    autoLoadIntoProfile = false
+  ) => {
     setErrorMsg(null);
     setErrorDetails(null);
     setSamagraPortalFallback(null);
     setStatusBanner(null);
 
-    const validation = validateSamagraLookupId(searchId);
+    const validation = validateSamagraLookupId(rawQuery);
     if (!validation.valid) {
       setErrorMsg(
         validation.error ||
@@ -251,61 +258,52 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
 
     setSearching(true);
     try {
-      const res = await fetch(`/api/samagra/${encodeURIComponent(validation.cleaned)}`);
-      const parsed = await parseApiResponse<{
-        family?: SamagraFamily;
-        source?: string;
-        liveConfigured?: boolean;
-        notice?: string;
-      }>(res);
+      const result = await verifySamagraId(validation.cleaned);
 
-      if (parsed.ok && parsed.data?.family) {
-        const fam = parsed.data.family;
+      if (result.ok && result.family) {
+        const fam = result.family;
         rememberSamagraFamilyId(fam.familyId);
         setSelectedFamily(fam);
         setRegisteredFamilies(prev => [fam, ...prev.filter(f => f.familyId !== fam.familyId)]);
         setShowRegisterForm(false);
-        const sourceNote =
-          parsed.data.liveConfigured === false && parsed.data.notice
-            ? ` (${parsed.data.notice})`
-            : '';
+        const sourceNote = result.notice ? ` (${result.notice})` : '';
         const successText = `Fetched verified Samagra record for Family ID ${fam.familyId}${sourceNote}`;
         setStatusBanner(successText);
         onNotify?.({
           type: 'success',
-          title: 'Samagra Record Loaded',
-          message: `Family ID ${fam.familyId} loaded successfully.`,
+          title: 'Samagra Record Verified',
+          message: `${fam.headName} (Family ID ${fam.familyId}) verified successfully.`,
         });
+
+        if (autoLoadIntoProfile && fam.members.length > 0) {
+          const matchedMember =
+            fam.members.find(m => m.memberId === validation.cleaned) || fam.members[0];
+          onSelectMemberForProfile(matchedMember, fam);
+        }
         return;
       }
 
-      const errInfo = parsed.errorInfo || {
-        status: parsed.status,
-        error: `No verified Samagra record found for "${validation.cleaned}".`,
-        portalUrl: SAMAGRA_PORTAL_URL,
-        allowManualEntry: true,
-      };
       setSelectedFamily(null);
-      setErrorMsg(errInfo.error);
-      setErrorDetails(errInfo.details || null);
+      setErrorMsg(result.error || `No verified Samagra record found for "${validation.cleaned}".`);
+      setErrorDetails(result.details || null);
       setSamagraPortalFallback({
         searchedId: validation.cleaned,
         kind: validation.kind,
-        error: errInfo.error,
-        details: errInfo.details,
-        portalUrl: errInfo.portalUrl || SAMAGRA_PORTAL_URL,
-        allowManualEntry: errInfo.allowManualEntry ?? true,
+        error: result.error || `No verified Samagra record found for "${validation.cleaned}".`,
+        details: result.details,
+        portalUrl: result.portalUrl || SAMAGRA_PORTAL_URL,
+        allowManualEntry: result.allowManualEntry ?? true,
       });
       onNotify?.({
         type: 'warning',
         title: 'Samagra Portal Lookup',
-        message: errInfo.error,
-        details: errInfo.details,
-        actionUrl: errInfo.portalUrl || SAMAGRA_PORTAL_URL,
+        message: result.error || `No verified Samagra record found for "${validation.cleaned}".`,
+        details: result.details,
+        actionUrl: result.portalUrl || SAMAGRA_PORTAL_URL,
         actionLabel: 'Open samagra.gov.in',
       });
     } catch {
-      const msg = 'Unable to reach live Samagra API endpoint. Please verify server connectivity.';
+      const msg = 'Unable to reach Samagra verification API endpoint. Please verify server connectivity.';
       setErrorMsg(msg);
       onNotify?.({
         type: 'error',
@@ -314,6 +312,23 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
       });
     } finally {
       setSearching(false);
+    }
+  };
+
+  const handleSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (searching) return;
+    await executeSamagraLookup(searchId, false);
+  };
+
+  const handleDemoCredentialClick = async (cred: DemoCitizenCredential) => {
+    if (searching || loadingDemoMemberId) return;
+    setSearchId(cred.memberId);
+    setLoadingDemoMemberId(cred.memberId);
+    try {
+      await executeSamagraLookup(cred.memberId, true);
+    } finally {
+      setLoadingDemoMemberId(null);
     }
   };
 
@@ -687,6 +702,15 @@ export const SamagraFamilyView: React.FC<SamagraFamilyViewProps> = ({
           )}
         </div>
       )}
+
+      {/* Demo Test Credentials Helper Card (Indore 6-Tier Profiles) */}
+      <DemoCredentialsCard
+        currentLanguage={currentLanguage}
+        activeMemberId={activeMemberId}
+        loadingMemberId={loadingDemoMemberId}
+        onSelectDemoCredential={handleDemoCredentialClick}
+        compact
+      />
 
       {/* Search Box */}
       <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">

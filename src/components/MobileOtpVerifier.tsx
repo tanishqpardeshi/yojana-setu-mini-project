@@ -2,13 +2,15 @@ import React, { useEffect, useState } from 'react';
 import {
   AlertCircle,
   CheckCircle2,
+  Copy,
   Loader2,
   MessageSquare,
   Phone,
   ShieldCheck,
+  Sparkles,
 } from 'lucide-react';
-import { parseApiResponse } from '../utils/apiClient';
 import { validateIndianMobile } from '../utils/samagraValidator';
+import { sendOtp, USE_MOCK_API, verifyOtp } from '../services/govApiService';
 import { ToastItem } from './ToastContainer';
 import { SupportedLanguage } from '../types';
 import { pickText } from '../utils/i18n';
@@ -54,6 +56,12 @@ export const MobileOtpVerifier: React.FC<MobileOtpVerifierProps> = ({
   const [inlineError, setInlineError] = useState<string | null>(null);
   const [inlineErrorDetails, setInlineErrorDetails] = useState<string | null>(null);
   const [inlineSuccess, setInlineSuccess] = useState<string | null>(null);
+  const [demoOtpBanner, setDemoOtpBanner] = useState<{
+    otp: string;
+    templateId?: string;
+    messageId?: string;
+    senderId?: string;
+  } | null>(null);
 
   useEffect(() => {
     if (cooldownSec <= 0) return;
@@ -71,6 +79,7 @@ export const MobileOtpVerifier: React.FC<MobileOtpVerifierProps> = ({
       setOtpCode('');
       setSentMobileE164(null);
       setInlineSuccess(null);
+      setDemoOtpBanner(null);
     }
   }, [value, sentMobileE164]);
 
@@ -79,6 +88,7 @@ export const MobileOtpVerifier: React.FC<MobileOtpVerifierProps> = ({
     setInlineError(null);
     setInlineErrorDetails(null);
     setInlineSuccess(null);
+    setDemoOtpBanner(null);
 
     const check = validateIndianMobile(value);
     if (!check.valid) {
@@ -96,50 +106,53 @@ export const MobileOtpVerifier: React.FC<MobileOtpVerifierProps> = ({
 
     setSendingOtp(true);
     try {
-      const res = await fetch('/api/auth/mobile/send-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mobileNumber: check.e164 }),
-      });
-      const parsed = await parseApiResponse<{
-        mobileNumber?: string;
-        cooldownSeconds?: number;
-        message?: string;
-        retryAfterSeconds?: number;
-      }>(res);
+      const result = await sendOtp(check.e164);
 
-      if (!parsed.ok) {
-        const errInfo = parsed.errorInfo || {
-          status: parsed.status,
-          error: 'Could not send mobile verification OTP.',
-        };
-        if (parsed.status === 429 && typeof parsed.data?.retryAfterSeconds === 'number') {
-          setCooldownSec(Math.max(1, parsed.data.retryAfterSeconds));
+      if (!result.ok) {
+        if (result.status === 429 && typeof result.retryAfterSeconds === 'number') {
+          setCooldownSec(Math.max(1, result.retryAfterSeconds));
         }
-        setInlineError(errInfo.error);
-        setInlineErrorDetails(errInfo.details || null);
+        setInlineError(result.error || 'Could not send mobile verification OTP.');
+        setInlineErrorDetails(result.details || null);
         onNotify?.({
           type: 'error',
-          title: parsed.status === 503 ? 'SMS Gateway Not Configured' : 'OTP Send Failed',
-          message: errInfo.error,
-          details: errInfo.details,
+          title: result.status === 503 ? 'SMS Gateway Not Configured' : 'OTP Send Failed',
+          message: result.error || 'Could not send mobile verification OTP.',
+          details: result.details,
         });
         return;
       }
 
-      const cooldown = parsed.data?.cooldownSeconds ?? 60;
-      setSentMobileE164(parsed.data?.mobileNumber || check.e164);
+      const cooldown = result.cooldownSeconds ?? (USE_MOCK_API ? 15 : 60);
+      setSentMobileE164(result.mobileNumber || check.e164);
       setOtpSent(true);
       setOtpCode('');
       setCooldownSec(cooldown);
+
+      if (result.demoOtp) {
+        setDemoOtpBanner({
+          otp: result.demoOtp,
+          templateId: result.templateId,
+          messageId: result.messageId,
+          senderId: result.senderId,
+        });
+      }
+
       const okMsg =
-        parsed.data?.message ||
+        result.message ||
         `A 6-digit OTP has been sent to ${check.e164}. Valid for 5 minutes.`;
       setInlineSuccess(okMsg);
       onNotify?.({
-        type: 'success',
-        title: t('OTP Dispatched', 'OTP भेजा गया', 'OTP भेज दियो गयो'),
-        message: okMsg,
+        type: 'info',
+        title: result.demoOtp
+          ? `Demo DLT SMS OTP: ${result.demoOtp}`
+          : t('OTP Dispatched', 'OTP भेजा गया', 'OTP भेज दियो गयो'),
+        message: result.demoOtp
+          ? `Use OTP ${result.demoOtp} to verify ${result.mobileNumber || check.e164} (valid 5 min).`
+          : okMsg,
+        details: result.templateId
+          ? `TRAI DLT Status: ${result.dltStatus || 'SENT'} · Template: ${result.templateId} · MsgID: ${result.messageId || '—'}`
+          : undefined,
       });
     } catch (err) {
       const msg = 'Network error while requesting SMS OTP. Please verify server connectivity.';
@@ -184,56 +197,34 @@ export const MobileOtpVerifier: React.FC<MobileOtpVerifierProps> = ({
 
     setVerifyingOtp(true);
     try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (authToken) {
-        headers.Authorization = `Bearer ${authToken}`;
-      }
+      const result = await verifyOtp(check.e164, cleanOtp, authToken);
 
-      const res = await fetch('/api/auth/mobile/verify-otp', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          mobileNumber: check.e164,
-          otp: cleanOtp,
-        }),
-      });
-
-      const parsed = await parseApiResponse<{
-        mobileNumber?: string;
-        mobileVerified?: boolean;
-        verificationToken?: string;
-        message?: string;
-      }>(res);
-
-      if (!parsed.ok || !parsed.data?.mobileVerified || !parsed.data?.verificationToken) {
-        const errInfo = parsed.errorInfo || {
-          status: parsed.status,
-          error: 'Could not verify OTP. Please try again.',
-        };
-        setInlineError(errInfo.error);
-        setInlineErrorDetails(errInfo.details || null);
+      if (!result.ok || !result.mobileVerified || !result.verificationToken) {
+        setInlineError(result.error || 'Could not verify OTP. Please try again.');
+        setInlineErrorDetails(result.details || null);
         onNotify?.({
           type: 'error',
           title: 'OTP Verification Failed',
-          message: errInfo.error,
-          details: errInfo.details,
+          message: result.error || 'Could not verify OTP. Please try again.',
+          details: result.details,
         });
         return;
       }
 
-      const verifiedMobile = parsed.data.mobileNumber || check.e164;
+      const verifiedMobile = result.mobileNumber || check.e164;
       setOtpSent(false);
       setOtpCode('');
       setCooldownSec(0);
-      setInlineSuccess(parsed.data.message || `Mobile number ${verifiedMobile} verified.`);
+      setDemoOtpBanner(null);
+      setInlineSuccess(result.message || `Mobile number ${verifiedMobile} verified.`);
       onVerified({
         mobileNumber: verifiedMobile,
-        verificationToken: parsed.data.verificationToken,
+        verificationToken: result.verificationToken,
       });
       onNotify?.({
         type: 'success',
         title: t('Mobile Number Verified', 'मोबाइल नंबर सत्यापित', 'मोबाइल नंबर पक्को हो गयो'),
-        message: `${verifiedMobile} verified via live SMS OTP.`,
+        message: `${verifiedMobile} verified via DLT SMS OTP.`,
       });
     } catch (err) {
       const msg = 'Network error while verifying OTP.';
@@ -335,7 +326,57 @@ export const MobileOtpVerifier: React.FC<MobileOtpVerifierProps> = ({
       </div>
 
       {otpSent && !isVerified && (
-        <div className="p-3 rounded-xl bg-amber-50/80 border border-amber-200 space-y-2">
+        <div className="p-3 rounded-xl bg-amber-50/80 border border-amber-200 space-y-2.5">
+          {demoOtpBanner && (
+            <div
+              data-testid="demo-otp-banner"
+              className="p-2.5 rounded-lg bg-slate-900 text-slate-100 border border-slate-700 flex flex-wrap items-center justify-between gap-2 text-[11px]"
+            >
+              <div className="space-y-0.5 min-w-0">
+                <div className="flex items-center gap-1.5 text-amber-300 font-bold">
+                  <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                  <span>
+                    {t('Demo DLT SMS OTP:', 'डेमो DLT SMS OTP:', 'डेमो DLT SMS OTP:')}{' '}
+                    <span className="font-mono text-sm text-white tracking-widest bg-slate-800 px-1.5 py-0.5 rounded">
+                      {demoOtpBanner.otp}
+                    </span>
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-400 font-mono truncate">
+                  DLT SENT · {demoOtpBanner.senderId || 'YOJSET'} · Tpl:{' '}
+                  {demoOtpBanner.templateId || '1107168900123456789'}
+                  {demoOtpBanner.messageId ? ` · ${demoOtpBanner.messageId}` : ''}
+                </p>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard?.writeText(demoOtpBanner.otp).catch(() => {});
+                    onNotify?.({
+                      type: 'info',
+                      title: 'OTP Copied',
+                      message: `Copied ${demoOtpBanner.otp} to clipboard.`,
+                    });
+                  }}
+                  className="px-2 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold inline-flex items-center gap-1 transition cursor-pointer"
+                  title="Copy OTP"
+                >
+                  <Copy className="w-3 h-3" />
+                  <span>{t('Copy', 'कॉपी', 'कॉपी')}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOtpCode(demoOtpBanner.otp)}
+                  data-testid="autofill-demo-otp-btn"
+                  className="px-2.5 py-1 rounded-md bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold transition cursor-pointer"
+                >
+                  {t('Auto-Fill OTP', 'OTP भरें', 'OTP भरो')}
+                </button>
+              </div>
+            </div>
+          )}
+
           <p className="text-[11px] font-semibold text-amber-950">
             {t(
               'Enter the 6-digit SMS OTP sent to',

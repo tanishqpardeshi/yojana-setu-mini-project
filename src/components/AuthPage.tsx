@@ -42,6 +42,8 @@ import {
 import { ToastItem } from './ToastContainer';
 import { ApiRequestError, parseApiResponse } from '../utils/apiClient';
 import { MobileOtpVerifier } from './MobileOtpVerifier';
+import { DemoCredentialsCard } from './DemoCredentialsCard';
+import { DemoCitizenCredential, verifySamagraId } from '../services/govApiService';
 import {
   SAMAGRA_PORTAL_URL,
   validateIndianMobile,
@@ -185,6 +187,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
   const [samagraFamilyResult, setSamagraFamilyResult] = useState<SamagraFamily | null>(null);
   const [liveSamagraList, setLiveSamagraList] = useState<SamagraFamily[]>([]);
   const [samagraLoading, setSamagraLoading] = useState(false);
+  const [loadingDemoMemberId, setLoadingDemoMemberId] = useState<string | null>(null);
   const [samagraError, setSamagraError] = useState<string | null>(null);
   const [samagraNotice, setSamagraNotice] = useState<string | null>(null);
   const [samagraPortalFallback, setSamagraPortalFallback] = useState<{
@@ -508,44 +511,38 @@ export const AuthPage: React.FC<AuthPageProps> = ({
     setSamagraNotice(null);
     setSamagraPortalFallback(null);
     try {
-      const res = await fetch(`/api/samagra/${encodeURIComponent(validation.cleaned)}`);
-      const parsed = await parseApiResponse<{
-        family?: SamagraFamily;
-        source?: string;
-        liveConfigured?: boolean;
-        notice?: string;
-      }>(res);
-      if (parsed.ok && parsed.data?.family) {
-        setSamagraFamilyResult(parsed.data.family);
-        setSamagraNotice(parsed.data.notice || null);
+      const result = await verifySamagraId(validation.cleaned);
+      if (result.ok && result.family) {
+        setSamagraFamilyResult(result.family);
+        setSamagraNotice(
+          result.notice ||
+            (result.citizen
+              ? `Verified ${result.citizen.name} (${result.citizen.localBody}) via MP Samagra Portal API.`
+              : null)
+        );
         setSamagraPortalFallback(null);
         return;
       }
 
-      const errInfo = parsed.errorInfo || {
-        status: parsed.status,
-        error: `No verified Samagra record found for "${validation.cleaned}".`,
-        portalUrl: SAMAGRA_PORTAL_URL,
-        allowManualEntry: true,
-      };
+      const errMsg = result.error || `No verified Samagra record found for "${validation.cleaned}".`;
       setSamagraFamilyResult(null);
-      setSamagraError(errInfo.error);
+      setSamagraError(errMsg);
       setSamagraPortalFallback({
-        error: errInfo.error,
-        details: errInfo.details,
-        portalUrl: errInfo.portalUrl || SAMAGRA_PORTAL_URL,
-        allowManualEntry: errInfo.allowManualEntry ?? true,
+        error: errMsg,
+        details: result.details,
+        portalUrl: result.portalUrl || SAMAGRA_PORTAL_URL,
+        allowManualEntry: result.allowManualEntry ?? true,
       });
       onNotify?.({
         type: 'warning',
         title: 'Samagra Lookup Notice',
-        message: errInfo.error,
-        details: errInfo.details,
-        actionUrl: errInfo.portalUrl || SAMAGRA_PORTAL_URL,
+        message: errMsg,
+        details: result.details,
+        actionUrl: result.portalUrl || SAMAGRA_PORTAL_URL,
         actionLabel: 'Verify on samagra.gov.in',
       });
     } catch {
-      const msg = 'Unable to reach live Samagra directory API. Please try again.';
+      const msg = 'Unable to reach Samagra Portal API. Please try again.';
       setSamagraFamilyResult(null);
       setSamagraError(msg);
       onNotify?.({
@@ -555,6 +552,44 @@ export const AuthPage: React.FC<AuthPageProps> = ({
       });
     } finally {
       setSamagraLoading(false);
+    }
+  };
+
+  const handleSelectDemoCredential = async (cred: DemoCitizenCredential) => {
+    if (loadingDemoMemberId || isSubmitting) return;
+    setLoadingDemoMemberId(cred.memberId);
+    setSamagraQuery(cred.memberId);
+    setAuthMethod('samagra');
+    setErrorMsg(null);
+    setSamagraError(null);
+    setSamagraNotice(null);
+    setSamagraPortalFallback(null);
+
+    try {
+      const result = await verifySamagraId(cred.memberId);
+      if (!result.ok || !result.family) {
+        setSamagraError(result.error || `Could not verify demo Samagra ID ${cred.memberId}.`);
+        return;
+      }
+      setSamagraFamilyResult(result.family);
+      const matchedMember =
+        result.family.members.find(m => m.memberId === cred.memberId) || result.family.members[0];
+      if (matchedMember) {
+        await onSamagraSessionLogin(matchedMember, result.family);
+        setSuccessMsg(
+          `Verified ${matchedMember.name} (${matchedMember.memberId}) via /api/gov/samagra/verify. Profile auto-populated.`
+        );
+      }
+    } catch (err) {
+      const msg = formatAuthErrorMessage(err);
+      setSamagraError(msg);
+      onNotify?.({
+        type: 'error',
+        title: 'Demo Verification Failed',
+        message: msg,
+      });
+    } finally {
+      setLoadingDemoMemberId(null);
     }
   };
 
@@ -912,6 +947,14 @@ export const AuthPage: React.FC<AuthPageProps> = ({
               </div>
             </div>
           )}
+
+          {/* One-Click Demo Test Credentials Helper Card */}
+          <DemoCredentialsCard
+            currentLanguage={currentLanguage}
+            onSelectDemoCredential={handleSelectDemoCredential}
+            loadingMemberId={loadingDemoMemberId}
+            activeMemberId={citizenProfile.samagraMemberId}
+          />
         </div>
 
         {/* Right Column: Login / Registration / Profile Sync Card */}
