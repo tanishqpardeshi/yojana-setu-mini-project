@@ -131,3 +131,73 @@ test('isDigiLockerOAuthConfigured requires DIGILOCKER_CLIENT_ID and DIGILOCKER_C
   if (prevSec !== undefined) process.env.DIGILOCKER_CLIENT_SECRET = prevSec;
   else delete process.env.DIGILOCKER_CLIENT_SECRET;
 });
+
+test('dbService.revokeDigiLockerEntry removes both credential and document by cred.id or canonical docId', async () => {
+  const { dbService } = await import('./db.js');
+  await dbService.init();
+  const citizenKey = `test_revoke_${Date.now()}`;
+  const credId = `dl_test_${Date.now()}_aadhaar`;
+  const credUri = `in.gov.uidai-ADHAR-${Date.now()}`;
+
+  try {
+    await dbService.upsertDigiLockerCredential({
+      id: credId,
+      citizenId: citizenKey,
+      docId: 'aadhaar',
+      docUri: credUri,
+      docName: 'Aadhaar Card',
+      docNumber: 'XXXX-XXXX-4411',
+      issuer: 'UIDAI',
+      verified: true,
+      verifiedAt: new Date().toISOString(),
+    });
+    await dbService.upsertDigiLockerDocument({
+      citizenKey,
+      docId: 'aadhaar',
+      docNumber: 'XXXX-XXXX-4411',
+      source: 'digilocker',
+      issuer: 'UIDAI',
+      verified: true,
+      verifiedAt: new Date().toISOString(),
+    });
+
+    // Revoking by credential id (as the top synced credentials table does) must also clear digilocker_documents
+    const res1 = await dbService.revokeDigiLockerEntry(citizenKey, credId);
+    assert.equal(res1.removedCreds, 1);
+    assert.equal(res1.removedDocs, 1);
+    assert.equal((await dbService.getDigiLockerCredentials(citizenKey)).length, 0);
+    assert.equal((await dbService.getDigiLockerDocuments(citizenKey)).length, 0);
+
+    // Re-insert and verify revoking by canonical docId ('aadhaar') also clears both
+    await dbService.upsertDigiLockerCredential({
+      id: credId,
+      citizenId: citizenKey,
+      docId: 'aadhaar',
+      docUri: credUri,
+      docName: 'Aadhaar Card',
+      docNumber: 'XXXX-XXXX-4411',
+      issuer: 'UIDAI',
+      verified: true,
+      verifiedAt: new Date().toISOString(),
+    });
+    await dbService.upsertDigiLockerDocument({
+      citizenKey,
+      docId: 'aadhaar',
+      docNumber: 'XXXX-XXXX-4411',
+      source: 'digilocker',
+      issuer: 'UIDAI',
+      verified: true,
+      verifiedAt: new Date().toISOString(),
+    });
+
+    const res2 = await dbService.revokeDigiLockerEntry(citizenKey, 'aadhaar');
+    assert.equal(res2.removedCreds, 1);
+    assert.equal(res2.removedDocs, 1);
+    assert.equal((await dbService.getDigiLockerCredentials(citizenKey)).length, 0);
+    assert.equal((await dbService.getDigiLockerDocuments(citizenKey)).length, 0);
+  } finally {
+    await dbService.revokeDigiLockerEntry(citizenKey, credId).catch(() => {});
+    await dbService.revokeDigiLockerEntry(citizenKey, 'aadhaar').catch(() => {});
+  }
+});
+

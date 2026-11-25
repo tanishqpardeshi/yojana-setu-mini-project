@@ -510,7 +510,14 @@ export async function updateCitizenProfileInFirestore(
     const sanitizedUpdates = stripUndefined({
       displayName: clampString(updates.displayName, 120),
       photoURL: clampString(updates.photoURL, 500),
-      phone: clampString(updates.phone, 20),
+      phone:
+        updates.phone !== undefined ? (clampString(updates.phone, 20) ?? '') : undefined,
+      mobileNumber:
+        updates.mobileNumber !== undefined
+          ? (clampString(updates.mobileNumber, 20) ?? '')
+          : undefined,
+      mobileVerified:
+        updates.mobileVerified !== undefined ? Boolean(updates.mobileVerified) : undefined,
       authMethod: updates.authMethod,
       samagraId: clampString(updates.samagraId || updates.samagraMemberId || updates.samagraFamilyId, 16),
       samagraFamilyId: clampString(updates.samagraFamilyId, 16),

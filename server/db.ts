@@ -2532,6 +2532,70 @@ export const dbService = {
     return info.changes > 0;
   },
 
+  async revokeDigiLockerEntry(
+    citizenKey: string,
+    docOrCredKey: string
+  ): Promise<{ removedDocs: number; removedCreds: number }> {
+    await ensureInitialized();
+    const cleanKey = citizenKey.trim();
+    const target = docOrCredKey.trim();
+    if (!cleanKey || !target) return { removedDocs: 0, removedCreds: 0 };
+
+    const docIdsToRemove = new Set<string>([target]);
+
+    if (pgPool) {
+      const matchedCreds = await pgPool.query(
+        'SELECT id, doc_id FROM digilocker_credentials WHERE citizen_id = $1 AND (id = $2 OR doc_uri = $2 OR doc_id = $2)',
+        [cleanKey, target]
+      );
+      for (const row of matchedCreds.rows) {
+        if (typeof row.doc_id === 'string' && row.doc_id.trim()) {
+          docIdsToRemove.add(row.doc_id.trim());
+        }
+      }
+      const docIds = Array.from(docIdsToRemove);
+      const credRes = await pgPool.query(
+        'DELETE FROM digilocker_credentials WHERE citizen_id = $1 AND (id = $2 OR doc_uri = $2 OR doc_id = ANY($3::text[]))',
+        [cleanKey, target, docIds]
+      );
+      const docRes = await pgPool.query(
+        'DELETE FROM digilocker_documents WHERE citizen_key = $1 AND doc_id = ANY($2::text[])',
+        [cleanKey, docIds]
+      );
+      return {
+        removedDocs: docRes.rowCount ?? 0,
+        removedCreds: credRes.rowCount ?? 0,
+      };
+    }
+
+    const matchedCreds = sqliteDb!
+      .prepare(
+        'SELECT id, doc_id FROM digilocker_credentials WHERE citizen_id = ? AND (id = ? OR doc_uri = ? OR doc_id = ?)'
+      )
+      .all(cleanKey, target, target, target) as Array<{ id: string; doc_id?: string | null }>;
+    for (const row of matchedCreds) {
+      if (typeof row.doc_id === 'string' && row.doc_id.trim()) {
+        docIdsToRemove.add(row.doc_id.trim());
+      }
+    }
+    const docIds = Array.from(docIdsToRemove);
+    const placeholders = docIds.map(() => '?').join(', ');
+    const credInfo = sqliteDb!
+      .prepare(
+        `DELETE FROM digilocker_credentials WHERE citizen_id = ? AND (id = ? OR doc_uri = ? OR doc_id IN (${placeholders}))`
+      )
+      .run(cleanKey, target, target, ...docIds);
+    const docInfo = sqliteDb!
+      .prepare(
+        `DELETE FROM digilocker_documents WHERE citizen_key = ? AND doc_id IN (${placeholders})`
+      )
+      .run(cleanKey, ...docIds);
+    return {
+      removedDocs: docInfo.changes,
+      removedCreds: credInfo.changes,
+    };
+  },
+
   // ---------- OAuth 2.0 PKCE State Store ----------
   async saveOAuthPkceState(rec: {
     state: string;

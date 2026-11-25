@@ -66,6 +66,7 @@ export const DOCUMENT_LABELS: Record<string, TriText> = {
   sambal_card: { en: 'Sambal 2.0 Card', hi: 'संबल 2.0 कार्ड', malwi: 'संबल 2.0 मजूर कार्ड' },
   elec_bill: { en: 'Electricity Bill', hi: 'विद्युत बिल', malwi: 'बिजली रो बिल' },
   birth_cert: { en: 'Birth Certificate', hi: 'जन्म प्रमाण पत्र', malwi: 'जनम प्रमाण पत्र' },
+  hsc_marksheet: { en: 'Class XII Marksheet', hi: 'कक्षा 12वीं अंकसूची', malwi: 'बारहवीं कक्षा री अंकसूची' },
 };
 
 export function getDocumentLabel(docId: string, lang: SupportedLanguage): string {

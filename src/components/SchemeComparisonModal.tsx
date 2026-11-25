@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   X,
   ArrowRightLeft,
@@ -37,10 +37,21 @@ export const SchemeComparisonModal: React.FC<SchemeComparisonModalProps> = ({
 }) => {
   const [selectedIds, setSelectedIds] = useState<string[]>(() => {
     if (initialSchemeId) {
-      return [initialSchemeId, schemes[1]?.id || schemes[0]?.id].filter(Boolean).slice(0, 2) as string[];
+      return [initialSchemeId, schemes.find(s => s.id !== initialSchemeId)?.id]
+        .filter(Boolean)
+        .slice(0, 2) as string[];
     }
     return ['pm_kisan', 'mp_kisan_kalyan'];
   });
+
+  useEffect(() => {
+    if (!isOpen || !initialSchemeId) return;
+    setSelectedIds(prev => {
+      if (prev.includes(initialSchemeId)) return prev;
+      const partner = prev.find(id => id !== initialSchemeId) || schemes.find(s => s.id !== initialSchemeId)?.id;
+      return [initialSchemeId, partner].filter((id): id is string => Boolean(id));
+    });
+  }, [isOpen, initialSchemeId, schemes]);
 
   const comparedSchemes = useMemo(() => {
     const matched = selectedIds

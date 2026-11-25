@@ -668,6 +668,12 @@ export default function App() {
               fetchAdminDistrictData();
             } else {
               fetchCitizenScopedApplications();
+              if (data.eventType === 'digilocker_updated') {
+                const targetKey = activeCitizenKey || 'citizen_oauth';
+                if (!data.citizenKey || data.citizenKey === targetKey) {
+                  syncCitizenDigiLockerWallet(targetKey);
+                }
+              }
             }
           }
         } catch {
@@ -681,7 +687,14 @@ export default function App() {
     return () => {
       if (eventSource) eventSource.close();
     };
-  }, [fetchLiveSchemes, fetchAdminDistrictData, fetchCitizenScopedApplications, isVerifiedAdmin]);
+  }, [
+    fetchLiveSchemes,
+    fetchAdminDistrictData,
+    fetchCitizenScopedApplications,
+    syncCitizenDigiLockerWallet,
+    activeCitizenKey,
+    isVerifiedAdmin,
+  ]);
 
   // Firebase Auth State Listener with Strict Citizen vs Admin Session Isolation
   useEffect(() => {
@@ -947,6 +960,8 @@ export default function App() {
       setUserProfileDoc(null);
       setAdminSession(null);
       setSavedSchemes([]);
+      setDigiLockerCredentials([]);
+      setIsProfileFilterApplied(false);
       setCitizenProfile(createEmptyCitizenProfile());
       setAuthBannerMessage(null);
       showToast({

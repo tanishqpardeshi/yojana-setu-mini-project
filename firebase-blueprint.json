@@ -10,6 +10,8 @@
         "displayName": { "type": "string", "maxLength": 120 },
         "photoURL": { "type": "string", "maxLength": 500 },
         "phone": { "type": "string", "maxLength": 20 },
+        "mobileNumber": { "type": "string", "maxLength": 20 },
+        "mobileVerified": { "type": "boolean" },
         "role": { "type": "string", "enum": ["citizen", "admin"] },
         "authMethod": { "type": "string", "enum": ["google", "email", "samagra"] },
         "samagraId": { "type": "string", "maxLength": 16 },

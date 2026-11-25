@@ -45,9 +45,9 @@ service cloud.firestore {
     function isValidUserProfile(data) {
       return data.keys().hasAll(['uid', 'email', 'displayName', 'role', 'createdAt'])
         && data.keys().hasOnly([
-          'uid', 'email', 'displayName', 'photoURL', 'phone', 'role', 'authMethod',
-          'samagraId', 'samagraFamilyId', 'samagraMemberId', 'areaType', 'wardNumber',
-          'blockName', 'category', 'age', 'gender', 'annualIncome', 'occupation',
+          'uid', 'email', 'displayName', 'photoURL', 'phone', 'mobileNumber', 'mobileVerified',
+          'role', 'authMethod', 'samagraId', 'samagraFamilyId', 'samagraMemberId', 'areaType',
+          'wardNumber', 'blockName', 'category', 'age', 'gender', 'annualIncome', 'occupation',
           'isBPL', 'hasDisability', 'maritalStatus', 'isMpDomicile', 'isIndoreResident',
           'ekycVerified', 'createdAt', 'updatedAt', 'lastLoginAt'
         ])
@@ -58,6 +58,8 @@ service cloud.firestore {
         && data.createdAt is string && data.createdAt.size() <= 40
         && (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 500))
         && (!('phone' in data) || (data.phone is string && data.phone.size() <= 20))
+        && (!('mobileNumber' in data) || (data.mobileNumber is string && data.mobileNumber.size() <= 20))
+        && (!('mobileVerified' in data) || data.mobileVerified is bool)
         && (!('authMethod' in data) || data.authMethod in ['google', 'email', 'samagra'])
         && (!('samagraId' in data) || (data.samagraId is string && data.samagraId.size() <= 16))
         && (!('samagraFamilyId' in data) || (data.samagraFamilyId is string && data.samagraFamilyId.size() <= 16))
@@ -142,8 +144,8 @@ service cloud.firestore {
           (isOwner(userId)
             && incoming().role == existing().role
             && incoming().diff(existing()).affectedKeys().hasOnly([
-              'displayName', 'photoURL', 'phone', 'authMethod', 'samagraId',
-              'samagraFamilyId', 'samagraMemberId', 'areaType', 'wardNumber',
+              'displayName', 'photoURL', 'phone', 'mobileNumber', 'mobileVerified', 'authMethod',
+              'samagraId', 'samagraFamilyId', 'samagraMemberId', 'areaType', 'wardNumber',
               'blockName', 'category', 'age', 'gender', 'annualIncome',
               'occupation', 'isBPL', 'hasDisability', 'maritalStatus',
               'isMpDomicile', 'isIndoreResident', 'ekycVerified',

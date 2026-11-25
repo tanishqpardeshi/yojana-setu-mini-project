@@ -1930,10 +1930,7 @@ app.post('/api/digilocker/sync-all', async (req: Request, res: Response) => {
 app.delete('/api/digilocker/:citizenKey/:docId', async (req: Request, res: Response) => {
   try {
     const { citizenKey, docId } = req.params;
-    await Promise.all([
-      dbService.deleteDigiLockerDocument(citizenKey, docId),
-      dbService.deleteDigiLockerCredential(citizenKey, docId),
-    ]);
+    await dbService.revokeDigiLockerEntry(citizenKey, docId);
     const [documents, credentials] = await Promise.all([
       dbService.getDigiLockerDocuments(citizenKey),
       dbService.getDigiLockerCredentials(citizenKey),
