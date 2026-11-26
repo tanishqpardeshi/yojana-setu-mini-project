@@ -2220,6 +2220,68 @@ async function startServer() {
       },
       appType: 'spa',
     });
+
+    if (isHmrDisabled) {
+      // Vite 8 still injects /@vite/client even when hmr:false & ws:false, which tries to open
+      // a WebSocket to port 24678 and causes unhandled rejections. Serve a lightweight zero-WS
+      // ESM shim exporting the exact client helpers required by Vite CSS/module transforms.
+      const viteClientNoWsShim = `
+const sheetsMap = new Map();
+
+export function updateStyle(id, content) {
+  let style = sheetsMap.get(id);
+  if (!style) {
+    style = document.createElement('style');
+    style.setAttribute('type', 'text/css');
+    style.setAttribute('data-vite-dev-id', id);
+    style.textContent = content;
+    document.head.appendChild(style);
+    sheetsMap.set(id, style);
+  } else {
+    style.textContent = content;
+  }
+}
+
+export function removeStyle(id) {
+  const style = sheetsMap.get(id);
+  if (style) {
+    document.head.removeChild(style);
+    sheetsMap.delete(id);
+  }
+}
+
+export function createHotContext() {
+  return {
+    data: {},
+    accept() {},
+    acceptExports() {},
+    dispose() {},
+    prune() {},
+    decline() {},
+    invalidate() {},
+    on() {},
+    off() {},
+    send() {},
+  };
+}
+
+export function injectQuery(url, queryToInject) {
+  if (url[0] !== '.' && url[0] !== '/') return url;
+  const pathname = url.replace(/[?#].*$/, '');
+  const { search, hash } = new URL(url, 'http://vite.local');
+  return pathname + '?' + queryToInject + (search ? '&' + search.slice(1) : '') + hash;
+}
+
+export class ErrorOverlay extends HTMLElement {}
+`.trim();
+
+      app.get('/@vite/client', (_req: Request, res: Response) => {
+        res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.send(viteClientNoWsShim);
+      });
+    }
+
     app.use(viteServer.middlewares);
   } else {
     app.use(express.static(path.resolve(__dirname, 'dist')));

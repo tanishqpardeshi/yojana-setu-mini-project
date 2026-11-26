@@ -519,9 +519,23 @@ export async function updateCitizenProfileInFirestore(
       mobileVerified:
         updates.mobileVerified !== undefined ? Boolean(updates.mobileVerified) : undefined,
       authMethod: updates.authMethod,
-      samagraId: clampString(updates.samagraId || updates.samagraMemberId || updates.samagraFamilyId, 16),
-      samagraFamilyId: clampString(updates.samagraFamilyId, 16),
-      samagraMemberId: clampString(updates.samagraMemberId, 16),
+      samagraId:
+        updates.samagraId !== undefined ||
+        updates.samagraMemberId !== undefined ||
+        updates.samagraFamilyId !== undefined
+          ? (clampString(
+              updates.samagraId || updates.samagraMemberId || updates.samagraFamilyId,
+              16
+            ) ?? '')
+          : undefined,
+      samagraFamilyId:
+        updates.samagraFamilyId !== undefined
+          ? (clampString(updates.samagraFamilyId, 16) ?? '')
+          : undefined,
+      samagraMemberId:
+        updates.samagraMemberId !== undefined
+          ? (clampString(updates.samagraMemberId, 16) ?? '')
+          : undefined,
       areaType: updates.areaType,
       wardNumber: resolvedWard,
       blockName: resolvedBlock,

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   AlertCircle,
   CheckCircle2,
@@ -74,6 +74,13 @@ export const DigiLockerConsentModal: React.FC<DigiLockerConsentModalProps> = ({
   ]);
   const [phase, setPhase] = useState<'idle' | 'token' | 'fetching'>('idle');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setErrorMsg(null);
+      setPhase('idle');
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 

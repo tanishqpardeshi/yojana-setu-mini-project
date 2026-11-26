@@ -71,7 +71,7 @@ export const CitizenEntitlementCardModal: React.FC<CitizenEntitlementCardModalPr
     eligibleSchemes.map(e => e.scheme.id)
   );
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
-  const verificationUrl = `${origin}/?verifyARN=${encodeURIComponent(cardRef)}`;
+  const verificationUrl = `${origin}/tracker?verifyARN=${encodeURIComponent(cardRef)}`;
 
   const whatsappText =
     `YojanaSetu Indore - Citizen Entitlement Card\n` +
@@ -87,10 +87,16 @@ export const CitizenEntitlementCardModal: React.FC<CitizenEntitlementCardModalPr
     window.print();
   };
 
-  const handleCopyLink = () => {
-    navigator.clipboard?.writeText(verificationUrl);
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2500);
+  const handleCopyLink = async () => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(verificationUrl);
+      }
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2500);
+    } catch {
+      // Clipboard may be restricted in sandboxed contexts
+    }
   };
 
   return (
@@ -452,7 +458,7 @@ export const CitizenEntitlementCardModal: React.FC<CitizenEntitlementCardModalPr
 
       {/* QR Verification Modal */}
       {showQrDeepLinkModal && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
           <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 text-center space-y-4">
             <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto text-amber-600">
               <QrCode className="w-10 h-10" />

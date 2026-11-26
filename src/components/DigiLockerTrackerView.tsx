@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ShieldCheck,
   CheckCircle2,
@@ -83,6 +83,21 @@ export const DigiLockerTrackerView: React.FC<DigiLockerTrackerViewProps> = ({
 
   const effectiveCitizenKey = citizenKey || 'citizen_oauth';
 
+  const pollTimerRef = useRef<number | null>(null);
+
+  const clearPopupPollTimer = () => {
+    if (pollTimerRef.current !== null) {
+      window.clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      clearPopupPollTimer();
+    };
+  }, []);
+
   useEffect(() => {
     if (oauthMeta?.redirectUri) {
       setOauthRedirectUri(oauthMeta.redirectUri);
@@ -110,6 +125,7 @@ export const DigiLockerTrackerView: React.FC<DigiLockerTrackerViewProps> = ({
       };
 
       if (payload.type === 'DIGILOCKER_OAUTH_SUCCESS') {
+        clearPopupPollTimer();
         setConnectingOAuth(false);
         setErrorMessage(null);
         setErrorDetails(null);
@@ -123,6 +139,7 @@ export const DigiLockerTrackerView: React.FC<DigiLockerTrackerViewProps> = ({
         });
         void onRefreshWallet?.();
       } else if (payload.type === 'DIGILOCKER_OAUTH_ERROR') {
+        clearPopupPollTimer();
         setConnectingOAuth(false);
         const errMsg = payload.error || 'Official DigiLocker authorization could not complete.';
         setErrorMessage(errMsg);
@@ -220,9 +237,10 @@ export const DigiLockerTrackerView: React.FC<DigiLockerTrackerViewProps> = ({
       }
 
       // If the user manually closes the popup without finishing, stop spinner cleanly
-      const pollTimer = window.setInterval(() => {
+      clearPopupPollTimer();
+      pollTimerRef.current = window.setInterval(() => {
         if (popup.closed) {
-          window.clearInterval(pollTimer);
+          clearPopupPollTimer();
           setConnectingOAuth(false);
         }
       }, 600);

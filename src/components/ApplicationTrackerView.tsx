@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Search,
   CheckCircle,
@@ -59,30 +59,33 @@ export const ApplicationTrackerView: React.FC<ApplicationTrackerViewProps> = ({
     }
   }, [applications, selectedRecord]);
 
+  const handledQueryArnRef = useRef<string | null>(null);
+
   // Check URL query parameters for ?verifyARN= or ?arn=
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
     const targetArn = (params.get('verifyARN') || params.get('arn'))?.trim().toUpperCase();
-    if (targetArn) {
-      setSearchArn(targetArn);
-      const match = applications.find(a => a.arn.toUpperCase() === targetArn);
-      if (match) {
-        setSelectedRecord(match);
-      } else {
-        fetch(`/api/applications/${encodeURIComponent(targetArn)}`)
-          .then(res => parseApiResponse<{ record?: ApplicationRecord }>(res))
-          .then(parsed => {
-            if (parsed.ok && parsed.data?.record) {
-              setSelectedRecord(parsed.data.record);
-            } else if (!parsed.ok) {
-              setSearchError(parsed.errorInfo?.error || `ARN "${targetArn}" was not found.`);
-            }
-          })
-          .catch(() => {
-            setSearchError('Unable to reach live ARN tracking service.');
-          });
-      }
+    if (!targetArn || handledQueryArnRef.current === targetArn) return;
+
+    handledQueryArnRef.current = targetArn;
+    setSearchArn(targetArn);
+    const match = applications.find(a => a.arn.toUpperCase() === targetArn);
+    if (match) {
+      setSelectedRecord(match);
+    } else {
+      fetch(`/api/applications/${encodeURIComponent(targetArn)}`)
+        .then(res => parseApiResponse<{ record?: ApplicationRecord }>(res))
+        .then(parsed => {
+          if (parsed.ok && parsed.data?.record) {
+            setSelectedRecord(parsed.data.record);
+          } else if (!parsed.ok) {
+            setSearchError(parsed.errorInfo?.error || `ARN "${targetArn}" was not found.`);
+          }
+        })
+        .catch(() => {
+          setSearchError('Unable to reach live ARN tracking service.');
+        });
     }
   }, [applications]);
 
@@ -149,7 +152,7 @@ export const ApplicationTrackerView: React.FC<ApplicationTrackerViewProps> = ({
 
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
   const verificationUrl = selectedRecord
-    ? `${origin}/?verifyARN=${encodeURIComponent(selectedRecord.arn)}`
+    ? `${origin}/tracker?verifyARN=${encodeURIComponent(selectedRecord.arn)}`
     : '';
 
   const handleCopyLink = async () => {

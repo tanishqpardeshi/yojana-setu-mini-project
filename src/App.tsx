@@ -176,7 +176,15 @@ function mapDigiLockerRecordsToProfileMap(
 }
 
 export default function App() {
-  const [pathname, setPathname] = useState<string>(() => normalizePathname(window.location.pathname));
+  const [pathname, setPathname] = useState<string>(() => {
+    const initialPath = normalizePathname(window.location.pathname);
+    const params = new URLSearchParams(window.location.search);
+    if (initialPath === '/' && (params.has('verifyARN') || params.has('arn'))) {
+      window.history.replaceState({}, '', `/tracker${window.location.search}`);
+      return '/tracker';
+    }
+    return initialPath;
+  });
   const [currentLanguage, setCurrentLanguage] = useState<SupportedLanguage>('en');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedLevel, setSelectedLevel] = useState<string>('all');
